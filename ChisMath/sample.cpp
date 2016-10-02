@@ -1,8 +1,12 @@
 #include "ChisExpr.h"
+#include <iostream>
 using namespace chis;
 int main() {
-	Expr expr1("min(y, x) + log(a, b)");
-	Expr expr2(Expr::sin(expr1));
-	Expr e2(expr1 ^ expr2);
+	while(1) {
+		std::string exp, dep_var;
+		std::cin >> exp;
+		Expr expr2(Expr::make_diff(Expr(exp), "x"));
+		std::cout << expr2.string_expr() << std::endl;
+	}
 	return 0;
 }
