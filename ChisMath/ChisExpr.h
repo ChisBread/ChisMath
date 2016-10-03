@@ -1,6 +1,7 @@
 #pragma once
 #include <fstream>
 #include <strstream>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <list>
@@ -177,6 +178,10 @@ namespace chis {
 		}
 		//禁止拷贝
 		Expr& operator=(const Expr&) = delete;
+		Expr& operator=(Expr&& expr) {
+			swap(expr);
+			return *this;
+		}
 		void init_id() {
 			for(auto &i : node_pool) {
 				if(i.type == ID) {
@@ -228,11 +233,36 @@ namespace chis {
 			else if(equal(this->root, b.root)) {
 				return opt(Expr("2"), MUL, "*", b);
 			}
+			// x + -y = x - y
+			if(b.root->type == NEGA) {
+				return *this - reverse_parse(b.root->subtree[0]);
+			}
+			//x-y + y = x
 			if(b.root->type == SUB && equal(this->root, b.root->subtree[1])) {
 				return reverse_parse(b.root->subtree[0]);
 			}
 			if(this->root->type == SUB && equal(b.root, this->root->subtree[1])) {
 				return reverse_parse(this->root->subtree[0]);
+			}
+			if(this->root->type == MUL && b.root->type == MUL) {
+				//a1*a2 + b1*b2
+				expr_node *a1 = this->root->subtree[0];
+				expr_node *a2 = this->root->subtree[1];
+				expr_node *b1 = b.root->subtree[0];
+				expr_node *b2 = b.root->subtree[1];
+
+				if(equal(a1, b1)) {
+					return (reverse_parse(a2) + reverse_parse(b2))*reverse_parse(a1);
+				}
+				else if(equal(a1, b2)) {
+					return (reverse_parse(a2) + reverse_parse(b1))*reverse_parse(a1);
+				}
+				else if(equal(a2, b2)) {
+					return (reverse_parse(a1) + reverse_parse(b1))*reverse_parse(a2);
+				}
+				else if(equal(a2, b1)) {
+					return (reverse_parse(a1) + reverse_parse(b2))*reverse_parse(a2);
+				}
 			}
 			return opt(*this, ADD, "+", b);
 		}
@@ -253,6 +283,32 @@ namespace chis {
 			//x - x = 0
 			else if(equal(this->root, b.root)) {
 				return Expr("0");
+			}
+			// x-y - z = x-(y+z)
+			if(this->root->type == SUB) {
+				return
+					reverse_parse(this->root->subtree[0])
+					- (reverse_parse(this->root->subtree[1]) + b);
+			}
+			if(this->root->type == MUL && b.root->type == MUL) {
+				//a1*a2 + b1*b2
+				expr_node *a1 = this->root->subtree[0];
+				expr_node *a2 = this->root->subtree[1];
+				expr_node *b1 = b.root->subtree[0];
+				expr_node *b2 = b.root->subtree[1];
+
+				if(equal(a1, b1)) {
+					return (reverse_parse(a2) - reverse_parse(b2))*reverse_parse(a1);
+				}
+				else if(equal(a1, b2)) {
+					return (reverse_parse(a2) - reverse_parse(b1))*reverse_parse(a1);
+				}
+				else if(equal(a2, b2)) {
+					return (reverse_parse(a1) - reverse_parse(b1))*reverse_parse(a2);
+				}
+				else if(equal(a2, b1)) {
+					return (reverse_parse(a1) - reverse_parse(b2))*reverse_parse(a2);
+				}
 			}
 			return opt(*this, SUB, "-", b);
 		}
@@ -302,7 +358,8 @@ namespace chis {
 			}
 			//TODO c1 / c2 = c3
 			if(this->root->type == CONST && b.root->type == CONST) {
-				return to_string(
+				return 
+					to_string(
 					to_double(this->root->name) / to_double(b.root->name));
 			}
 			//x / x = 1
@@ -312,9 +369,32 @@ namespace chis {
 			// gx^a / gx^b = gx^(a-b)
 			if(b.root->type == POW && this->root->type == POW
 				&& equal(b.root->subtree[0], this->root->subtree[0])) {
-				return reverse_parse(b.root->subtree[0])
+				return 
+					reverse_parse(b.root->subtree[0])
 					^ (reverse_parse(this->root->subtree[1]) - reverse_parse(b.root->subtree[1]));
 			}
+			// x/y / z = x/(y*z)
+			if(this->root->type == DIV) {
+				return
+					reverse_parse(this->root->subtree[0]) 
+					/ (reverse_parse(this->root->subtree[1]) * b);
+			}
+			// x/y / x = 1/y
+			if(this->root->type == DIV 
+				&& equal(this->root->subtree[0], b.root)) {
+				return
+					Expr("1") / reverse_parse(this->root->subtree[1]);
+			}
+			// x*y / x = y
+			if(this->root->type == MUL) {
+				if(equal(this->root->subtree[0], b.root)) {
+					return reverse_parse(this->root->subtree[1]);
+				}
+				else if(equal(this->root->subtree[1], b.root)) {
+					return reverse_parse(this->root->subtree[0]);
+				}
+			}
+
 			return opt(*this, DIV, "/", b);
 		}
 		Expr operator%(const Expr &b) const {
@@ -347,19 +427,28 @@ namespace chis {
 		static Expr opt(const Expr &a, int type, const std::string &name, const Expr &b) {
 			std::list<expr_node> nodes = a.node_pool;
 			if(prec_map[a.root->type] < prec_map[type] 
-				|| (prec_map[a.root->type] == prec_map[type] && a.root->type == DIV)) {
+				|| 
+				(prec_map[a.root->type] == prec_map[type]
+				//不满足交换律
+				&& (a.root->type == DIV || a.root->type == SUB))) {
 				nodes.push_front(expr_node(LP, "(")); 
 				nodes.push_back(expr_node(RP, ")")); 
 			}
 			nodes.push_back(expr_node(type, name));
 			if(prec_map[b.root->type] < prec_map[type]
-				|| (prec_map[b.root->type] == prec_map[type] && type == DIV))
+				|| 
+				(prec_map[b.root->type] == prec_map[type] 
+				//不满足交换律
+				&& (type == DIV || type == SUB)))
 				nodes.push_back(expr_node(LP, "("));
 			for(auto &i : b.node_pool) {
 				nodes.push_back(i);
 			}
 			if(prec_map[b.root->type] < prec_map[type]
-				|| (prec_map[b.root->type] == prec_map[type] && type == DIV))
+				|| 
+				(prec_map[b.root->type] == prec_map[type] 
+				//不满足交换律
+				&& (type == DIV || type == SUB)))
 				nodes.push_back(expr_node(RP, ")"));
 			return Expr(nodes);
 		}
@@ -444,35 +533,70 @@ namespace chis {
 			return diff(y.root, x);
 		}
 		static Expr reverse_parse(const expr_node *subroot);
-		static bool equal(const expr_node *a, const expr_node *b) {
-			//TODO 优化累加/累乘情况
-			if(a->name != b->name || a->subtree.size() != b->subtree.size()) {
+		bool operator<(const Expr &b) const {
+			return less_than(root, b.root);
+		}
+		void swap(Expr &b) {
+			std::swap(root, b.root);
+			std::swap(id_type, b.id_type);
+			std::swap(id_value, b.id_value);
+			std::swap(node_pool, b.node_pool);
+		}
+
+		void standardization() {
+			swap(standardization(root));
+		}
+	private:
+		static bool less_than(const expr_node *a, const expr_node *b) {
+			Expr &&ea = reverse_parse(a), &&eb = reverse_parse(b);
+			if(a->type == CONST && b->type != CONST) {
+				return true;
+			}
+			if(a->type != CONST && b->type == CONST) {
 				return false;
 			}
-			std::set<expr_node*> asub, bsub;
-			for(int i = 0; i < a->subtree.size(); ++i) {
-				if(!equal(a->subtree[i], b->subtree[i])) {
-					asub.insert(a->subtree[i]);
-					bsub.insert(b->subtree[i]);
-				}
+			if(ea.node_pool.size() < eb.node_pool.size()) {
+				return true;
 			}
-			for(auto as : asub) {
-				expr_node* equ = nullptr;
-				for(auto bs : bsub) {
-					if(equal(as, bs)) {
-						equ = bs;
+			else if(ea.node_pool.size() == eb.node_pool.size()) {
+				auto ba = ea.node_pool.begin();
+				auto bb = eb.node_pool.begin();
+				for(; ba != ea.node_pool.end(); ++ba, ++bb) {
+					if(ba->name.size() < bb->name.size()) {
+						return true;
+					}
+					else if(ba->name.size() == bb->name.size()) {
+						if(ba->name < bb->name) {
+							return true;
+						}
+						if(ba->name > bb->name) {
+							break;
+						}
+					}
+					else {
+						break;
 					}
 				}
-				if(equ) {
-					bsub.erase(equ);
-				}
 			}
-			if(bsub.empty()) {
+			return false;
+		}
+
+		static bool equal(const expr_node *a, const expr_node *b) {
+			Expr &&stda = standardization(a);
+			Expr &&stdb = standardization(b);
+			if(stda.node_pool.size() == stdb.node_pool.size()) {
+				auto ba = stda.node_pool.begin();
+				auto bb = stdb.node_pool.begin();
+				for(; ba != stda.node_pool.end(); ++ba, ++bb) {
+					if(ba->name != bb->name) {
+						return false;
+					}
+				}
 				return true;
 			}
 			return false;
 		}
-	private:
+		static Expr standardization(const expr_node *subroot);
 		static Expr diff(const expr_node *subroot, const std::string &x);
 		
 		expr_node *root;

@@ -291,7 +291,7 @@ namespace chis {
 			if(root->type == SUB) {
 				root->type = NEGA;
 			}
-			else {
+			else if(root->type == ADD){
 				root->type = POSI;
 			}
 			expr_node *l = nullptr;
@@ -498,22 +498,22 @@ namespace chis {
 			return diff(subroot->subtree.front(), x) - diff(subroot->subtree.back(), x);
 		case MUL:
 			return
-				diff(subroot->subtree.front(), x) * reverse_parse(subroot->subtree.back())
-				+ diff(subroot->subtree.back(), x) * reverse_parse(subroot->subtree.front());
+				diff(subroot->subtree.front(), x) * standardization(subroot->subtree.back())
+				+ diff(subroot->subtree.back(), x) * standardization(subroot->subtree.front());
 		case DIV:
 		{
 			// q / p
 			// dq / p - (q * dp / p^2))
-			Expr &&q = reverse_parse(subroot->subtree.front());
-			Expr &&p = reverse_parse(subroot->subtree.back());
+			Expr &&q = standardization(subroot->subtree.front());
+			Expr &&p = standardization(subroot->subtree.back());
 			Expr &&dq = diff(subroot->subtree.front(), x);
 			Expr &&dp = diff(subroot->subtree.back(), x);
 			return dq / p - (q * dp / (p ^ Expr("2")));
 		}
 		case POW:
 		{
-			Expr &&power = reverse_parse(subroot->subtree.back());
-			Expr &&base = reverse_parse(subroot->subtree.front());
+			Expr &&power = standardization(subroot->subtree.back());
+			Expr &&base = standardization(subroot->subtree.front());
 			//power中没有自变量x d(g(x)^c) = c*(g(x)^(c-1))*g'(x)dx
 			if(power.id_type.find(x) == power.id_type.end()) {
 				return power * (base ^ (power - Expr("1"))) * diff(subroot->subtree.front(), x);
@@ -525,23 +525,24 @@ namespace chis {
 			//d(g^f) -> e^(ln(g)*f)*d(ln(g)*f)
 			else {
 				Expr &&lng_x_f = ln(base)*power;
+				lng_x_f.standardization();
 				return (Expr("e") ^ lng_x_f)*diff(lng_x_f.root, x);
 			}
 		}
 		case SIN:
 			return
-				cos(reverse_parse(subroot->subtree.front()))
+				cos(standardization(subroot->subtree.front()))
 				* diff(subroot->subtree.front(), x);
 		case COS:
 			return
 				nega(
-				sin(reverse_parse(subroot->subtree.front())))
+				sin(standardization(subroot->subtree.front())))
 				* diff(subroot->subtree.front(), x);
 		case TAN:
 			return
 				(Expr("1")
 				/ (
-				cos(reverse_parse(subroot->subtree.front())) ^ Expr("2")
+				cos(standardization(subroot->subtree.front())) ^ Expr("2")
 				))
 				* diff(subroot->subtree.front(), x);
 		case COT:
@@ -549,14 +550,14 @@ namespace chis {
 				nega(
 				(Expr("1")
 				/ (
-				sin(reverse_parse(subroot->subtree.front())) ^ Expr("2")
+				sin(standardization(subroot->subtree.front())) ^ Expr("2")
 				)))
 				* diff(subroot->subtree.front(), x);
 		case ARCSIN:
 			return
 				Expr("1") /
 				(
-				(Expr("1") - ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") - ((standardization(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				)
 				* diff(subroot->subtree.front(), x);
@@ -564,7 +565,7 @@ namespace chis {
 			return
 				nega(Expr("1") /
 				(
-				(Expr("1") - ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") - ((standardization(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				))
 				* diff(subroot->subtree.front(), x);
@@ -572,7 +573,7 @@ namespace chis {
 			return
 				Expr("1") /
 				(
-				(Expr("1") + ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") + ((standardization(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				)
 				* diff(subroot->subtree.front(), x);
@@ -580,23 +581,167 @@ namespace chis {
 			return
 				nega(Expr("1") /
 				(
-				(Expr("1") + ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") + ((standardization(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				))
 				* diff(subroot->subtree.front(), x);
 		case LOG:
 		{
-			Expr &&lnx_div_lna = ln(reverse_parse(subroot->subtree.back()))
-				/ ln(reverse_parse(subroot->subtree.front()));
+			Expr &&lnx_div_lna = ln(standardization(subroot->subtree.back()))
+				/ ln(standardization(subroot->subtree.front()));
 			return diff(lnx_div_lna.root, x);
 		}
 		break;
 		case LN:
-			return Expr("1") / reverse_parse(subroot->subtree.front()) * diff(subroot->subtree.front(), x);
+			return Expr("1") / standardization(subroot->subtree.front()) * diff(subroot->subtree.front(), x);
 		default:
 			throw("fuck");
 			break;
 		}
 	}
+	Expr Expr::standardization(const expr_node *subroot) {
+		switch(subroot->type) {
+		case ID:
+		case CONST:
+			return Expr(subroot->name);
+		case EQU:
+			return
+				equal(
+				standardization(subroot->subtree[0])
+				, standardization(subroot->subtree[1]));
+		case ADD:
+		{
+			std::vector<Expr> nx;
+			std::queue<const expr_node*> addi;
+			addi.push(subroot);
+			//取出所有被加式到nx
+			while(!addi.empty()) {
+				if(addi.front()->subtree[0]->type == ADD) {
+					addi.push(addi.front()->subtree[0]);
+				}
+				else {
+					nx.push_back(standardization(addi.front()->subtree[0]));
+				}
+				if(addi.front()->subtree[1]->type == ADD) {
+					addi.push(addi.front()->subtree[1]);
+				}
+				else {
+					nx.push_back(standardization(addi.front()->subtree[1]));
+				}
+				addi.pop();
+			}
 
+			std::sort(nx.begin(), nx.end(),
+				[](const Expr &a, const Expr &b) {
+				return a < b;
+			}
+			);
+			Expr ret("0");
+			for(auto &i : nx) {
+
+				ret = ret + i;
+			}
+			return ret;
+		}
+		case SUB:
+			return
+				standardization(subroot->subtree[0])
+				- standardization(subroot->subtree[1]);
+		case MUL:
+		{
+			// TODO 去括号
+			std::vector<Expr> nx;
+			std::queue<const expr_node*> addi;
+			addi.push(subroot);
+			//取出所有被乘式到nx
+			while(!addi.empty()) {
+				if(addi.front()->subtree[0]->type == MUL) {
+					addi.push(addi.front()->subtree[0]);
+				}
+				else {
+					nx.push_back(reverse_parse(addi.front()->subtree[0]));
+				}
+				if(addi.front()->subtree[1]->type == MUL) {
+					addi.push(addi.front()->subtree[1]);
+				}
+				else {
+					nx.push_back(reverse_parse(addi.front()->subtree[1]));
+				}
+				addi.pop();
+			}
+
+			std::sort(nx.begin(), nx.end(),
+				[](const Expr &a, const Expr &b) {
+				return a < b;
+			}
+			);
+			Expr ret("1");
+			for(auto &i : nx) {
+				if(i.root->type == ADD) {
+					ret =
+						(ret * standardization(i.root->subtree[0]))
+						+ (ret * standardization(i.root->subtree[1]));
+				}
+				else if(i.root->type == SUB) {
+					ret =
+						(ret * standardization(i.root->subtree[0]))
+						- (ret * standardization(i.root->subtree[1]));
+				}
+				else if(ret.root->type == ADD) {
+					ret =
+						(i * standardization(ret.root->subtree[0]))
+						+ (i * standardization(ret.root->subtree[1]));
+				}
+				else if(ret.root->type == SUB) {
+					ret =
+						(i * standardization(ret.root->subtree[0]))
+						- (i * standardization(ret.root->subtree[1]));
+				}
+				else {
+					ret = ret * i;
+				}
+			}
+			return ret;
+		}
+		case DIV:
+			return
+				standardization(subroot->subtree[0])
+				/ standardization(subroot->subtree[1]);
+		case MOD:
+			return
+				standardization(subroot->subtree[0])
+				% standardization(subroot->subtree[1]);
+		case POW:
+			return
+				standardization(subroot->subtree[0])
+				^ standardization(subroot->subtree[1]);
+		case NEGA:
+			return nega(standardization(subroot->subtree.front()));
+		case POSI:
+			return standardization(subroot->subtree.front());
+		case SIN:
+		case COS:
+		case TAN:
+		case COT:
+		case ARCSIN:
+		case ARCCOS:
+		case ARCTAN:
+		case ARCCOT:
+		case LN:
+			return call_func(
+				standardization(subroot->subtree.front()),
+				subroot->type, subroot->name);
+		case LOG:
+		case MAX:
+		case MIN:
+		case DIFF:
+			return call_func(
+				standardization(subroot->subtree.front()),
+				standardization(subroot->subtree.back()),
+				subroot->type, subroot->name);
+		default:
+			throw("fuck");
+			break;
+		}
+	}
 }
