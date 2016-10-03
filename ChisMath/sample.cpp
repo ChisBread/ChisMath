@@ -7,11 +7,8 @@ int main() {
 		std::cin >> exp;
 		Expr expr(Expr::make_diff(Expr(exp), "x"));
 		//Expr expr("x^(21*x*9)");
-		std::cout << "RAW:" << expr.string_expr() << std::endl;
-		expr.standardization();
-		std::cout << "STD1:" << expr.string_expr() << std::endl;
-		expr.standardization();
-		std::cout << "STD2:" << expr.string_expr() << std::endl;
+		std::cout << expr.string_expr() << std::endl;
+		
 	}
 	//(11*x^2+2*x^2)
 	return 0;

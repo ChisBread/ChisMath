@@ -264,6 +264,25 @@ namespace chis {
 					return (reverse_parse(a1) + reverse_parse(b2))*reverse_parse(a2);
 				}
 			}
+			// a + a*x = (1+x)*a
+			if(b.root->type == MUL) {
+				if(equal(this->root, b.root->subtree[0])) {
+					return (Expr("1") + reverse_parse(b.root->subtree[1])) * *this;
+				}
+				if(equal(this->root, b.root->subtree[1])) {
+					return (Expr("1") + reverse_parse(b.root->subtree[0])) * *this;
+				}
+			}
+			// a*x + a = (1+x)*a
+			if(this->root->type == MUL) {
+				if(equal(this->root->subtree[0], b.root)) {
+					return (Expr("1") + reverse_parse(this->root->subtree[1])) * b;
+				}
+				if(equal(this->root->subtree[1], b.root)) {
+					return (Expr("1") + reverse_parse(this->root->subtree[0])) * b;
+				}
+			}
+
 			return opt(*this, ADD, "+", b);
 		}
 		Expr operator-(const Expr &b) const {
@@ -283,6 +302,10 @@ namespace chis {
 			//x - x = 0
 			else if(equal(this->root, b.root)) {
 				return Expr("0");
+			}
+			// x - -y = x + y
+			if(b.root->type == NEGA) {
+				return *this + reverse_parse(b.root->subtree[0]);
 			}
 			// x-y - z = x-(y+z)
 			if(this->root->type == SUB) {
@@ -320,6 +343,13 @@ namespace chis {
 			else if(b.root->name == "1") {
 				return *this;
 			}
+			if(this->root->name == "-1") {
+				return nega(b);
+			}
+			else if(b.root->name == "-1") {
+				return nega(*this);
+			}
+
 			if(this->root->name == "0" || b.root->name == "0") {
 				return Expr("0");
 			}
@@ -344,6 +374,21 @@ namespace chis {
 				&& equal(b.root->subtree[0], this->root->subtree[0])) {
 				return reverse_parse(b.root->subtree[0]) 
 					^ (reverse_parse(this->root->subtree[1]) + reverse_parse(b.root->subtree[1]));
+			}
+			//-a * -b = a * b
+			if(b.root->type == NEGA && this->root->type == NEGA) {
+				return 
+					reverse_parse(this->root->subtree[0]) 
+					* reverse_parse(b.root->subtree[0]);
+			}
+			// a * -b = -(a*b)
+			if(b.root->type == NEGA) {
+				return
+					nega(*this * reverse_parse(b.root->subtree[0]));
+			}
+			if(this->root->type == NEGA) {
+				return
+					nega(reverse_parse(this->root->subtree[0])* b);
 			}
 			return opt(*this, MUL, "*", b);
 		}
@@ -394,7 +439,12 @@ namespace chis {
 					return reverse_parse(this->root->subtree[0]);
 				}
 			}
-
+			// -a / -b = a / b
+			if(b.root->type == NEGA && this->root->type == NEGA) {
+				return
+					reverse_parse(this->root->subtree[0])
+					/ reverse_parse(b.root->subtree[0]);
+			}
 			return opt(*this, DIV, "/", b);
 		}
 		Expr operator%(const Expr &b) const {
@@ -453,6 +503,9 @@ namespace chis {
 			return Expr(nodes);
 		}
 		static Expr nega(const Expr &b) {
+			if(b.root->type == NEGA) {
+				return reverse_parse(b.root->subtree[0]);
+			}
 			return call_func(b, SUB, "-");
 		}
 		static Expr posi(const Expr &b) {
@@ -530,9 +583,9 @@ namespace chis {
 			return Expr(nodes);
 		}
 		static Expr make_diff(const Expr &y, const std::string &x) {
-			return diff(y.root, x);
+			return diff(standardization(y.root).root, x).standardization().reverse_parse();
 		}
-		static Expr reverse_parse(const expr_node *subroot);
+		
 		bool operator<(const Expr &b) const {
 			return less_than(root, b.root);
 		}
@@ -542,11 +595,16 @@ namespace chis {
 			std::swap(id_value, b.id_value);
 			std::swap(node_pool, b.node_pool);
 		}
-
-		void standardization() {
+		Expr& reverse_parse() {
+			swap(reverse_parse(root));
+			return *this;
+		}
+		Expr& standardization() {
 			swap(standardization(root));
+			return *this;
 		}
 	private:
+		static Expr reverse_parse(const expr_node *subroot);
 		static bool less_than(const expr_node *a, const expr_node *b) {
 			Expr &&ea = reverse_parse(a), &&eb = reverse_parse(b);
 			if(a->type == CONST && b->type != CONST) {
@@ -580,7 +638,6 @@ namespace chis {
 			}
 			return false;
 		}
-
 		static bool equal(const expr_node *a, const expr_node *b) {
 			Expr &&stda = standardization(a);
 			Expr &&stdb = standardization(b);

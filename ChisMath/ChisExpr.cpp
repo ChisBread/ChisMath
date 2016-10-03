@@ -135,32 +135,26 @@ namespace chis {
 
 	/*
 	1
-	EQU_EXP 
-	-> ADD_EXP
+	EQU_EXP -> ADD_EXP
 	|  ADD_EXP = ADD_EXP
 	2
-	ADD_EXP
-	-> MUL_EXP
+	ADD_EXP -> MUL_EXP
 	|  ADD_EXP + MUL_EXP
 	|  ADD_EXP - MUL_EXP
 	3
-	MUL_EXP
-	-> POW_EXP
+	MUL_EXP -> POW_EXP
 	|  MUL_EXP * POW_EXP
 	|  MUL_EXP / POW_EXP
 	|  MUL_EXP % POW_EXP
 	4
-	POW_EXP
-	-> UNARY_EXP
+	POW_EXP -> UNARY_EXP
 	| POW_EXP ^ UNARY_EXP
 	5
-	UNARY_EXP
-	-> FUNC_EXP
+	UNARY_EXP -> FUNC_EXP
 	|  + UNARY_EXP
 	|  - UNARY_EXP
 	6
-	FUNC_EXP
-	-> PRIMARY_EXP
+	FUNC_EXP -> PRIMARY_EXP
 	|  sin PRIMARY_EXP
 	|  cos PRIMARY_EXP
 	|  tan PRIMARY_EXP
@@ -175,8 +169,7 @@ namespace chis {
 	|  max ( ADD_EXP, ADD_EXP )
 	|  min ( ADD_EXP, ADD_EXP )
 	7
-	PRIMARY_EXP
-	-> ID
+	PRIMARY_EXP -> ID
 	|  NUM
 	|  ( ADD_EXP )
 
@@ -696,6 +689,16 @@ namespace chis {
 					ret =
 						(i * standardization(ret.root->subtree[0]))
 						- (i * standardization(ret.root->subtree[1]));
+				}
+				else if(
+					ret.root->type == MUL 
+					&& equal(ret.root->subtree[0], i.root)) {
+					ret = standardization(ret.root->subtree[1]) * (i ^ Expr("2"));
+				}
+				else if(
+					ret.root->type == MUL
+					&& equal(ret.root->subtree[1], i.root)) {
+					ret = standardization(ret.root->subtree[0]) * (i ^ Expr("2"));
 				}
 				else {
 					ret = ret * i;
