@@ -1,6 +1,7 @@
 #include "ChisExpr.h"
 namespace chis {
 	std::map<std::string, int> keyword = {
+		{ "ERROR", ERROR},
 		{ "sin", SIN }, { "cos", COS },
 		{ "tan", TAN }, { "cot", COT },
 		{ "arcsin", ARCSIN }, { "arccos", ARCCOS },
@@ -27,6 +28,8 @@ namespace chis {
 		{ MIN, 6 }, { MAX, 6 },
 	};
 	int max_typeid = MAX;
+	std::string Expr::error_message;
+	Expr::expr_node Expr::ERROR_NODE(ERROR, "ERROR");
 	double to_double(const std::string &num) {
 		std::strstream strs;
 		strs << num;
@@ -124,7 +127,7 @@ namespace chis {
 				}
 			}
 			else {
-				throw("WTF??");
+				error_message += name + "is unkown symbol.";
 			}
 			break;
 		}
@@ -178,22 +181,22 @@ namespace chis {
 		expr_node *l = nullptr, *root = nullptr, *r = nullptr;
 		l = parse_add();
 		if(l == nullptr) {
-			//throw("WTF? except additive_exp before '='");
 			return nullptr;
 		}
 		if(lexer.is_end()) { // additive_exp
 			root = l;
 		}
 		else { // equ
-			root = lexer.get_token();
-			if(root->type != EQU) {
-				//throw("WTF? except '=' ");
+			if(lexer.lookahead()->type != EQU) {
+				error_message +=
+					"except '=' after " + lexer.lookback()->name +
+					" but got " + lexer.lookahead()->name + "\n";
 				root = nullptr;
 			}
 			else {
+				root = lexer.get_token();
 				r = parse_add();
 				if(r == nullptr) {
-					//throw("WTF? except additive_exp after '='");
 					root = nullptr;
 				}
 				else {
@@ -216,14 +219,13 @@ namespace chis {
 				expr_node *r = nullptr;
 				r = parse_mul();
 				if(r == nullptr) {
+					root = nullptr;
 					break;
 				}
 				root->insert_subtree(*r);
 				l = root;
 			}
 			else {
-				//throw("except '+'/'-'");
-				//return nullptr;
 				break;
 			}
 		}
@@ -241,6 +243,7 @@ namespace chis {
 				expr_node *r = nullptr;
 				r = parse_pow();
 				if(r == nullptr) {
+					root = nullptr;
 					break;
 				}
 				root->insert_subtree(*r);
@@ -262,6 +265,7 @@ namespace chis {
 				expr_node *r = nullptr;
 				r = parse_unary();
 				if(r == nullptr) {
+					root = nullptr;
 					break;
 				}
 				root->insert_subtree(*r);
@@ -303,77 +307,84 @@ namespace chis {
 	}
 	Expr::expr_node* Expr::expr_parser::parse_func() {
 		expr_node *root = nullptr;
-		if(!lexer.is_end()) {
-			switch(lexer.lookahead()->type) {
-			case SIN:
-			case COS:
-			case TAN:
-			case COT:
-			case ARCSIN:
-			case ARCCOS:
-			case ARCTAN:
-			case ARCCOT:
-			case LN:
-			{
-				root = lexer.get_token();
-				expr_node *l = parse_primary();
-				if(l == nullptr) {
-					root = nullptr;
-				}
-				else {
-					root->insert_subtree(*l);
-				}
+		switch(lexer.lookahead()->type) {
+		case SIN:
+		case COS:
+		case TAN:
+		case COT:
+		case ARCSIN:
+		case ARCCOS:
+		case ARCTAN:
+		case ARCCOT:
+		case LN:
+		{
+			root = lexer.get_token();
+			expr_node *l = parse_primary();
+			if(l == nullptr) {
+				root = nullptr;
 			}
-			break;
-			case DIFF:
-			case LOG:
-			case MIN:
-			case MAX:
-			{
-				root = lexer.get_token();
-				expr_node *exp0 = nullptr, *exp1 = nullptr;
-				if(lexer.lookahead()->type == LP) {
+			else {
+				root->insert_subtree(*l);
+			}
+		}
+		break;
+		case DIFF:
+		case LOG:
+		case MIN:
+		case MAX:
+		{
+			root = lexer.get_token();
+			expr_node *exp0 = nullptr, *exp1 = nullptr;
+			if(lexer.lookahead()->type == LP) {
+				lexer.get_token();
+				exp0 = parse_add();
+				if(lexer.lookahead()->type == DOT) {
 					lexer.get_token();
-					exp0 = parse_add();
-					if(lexer.lookahead()->type == DOT) {
-						lexer.get_token();
-					}
-					else {
-						//throw("except ','");
-						root = nullptr;
-						break;
-					}
-					exp1 = parse_add();
-					if(lexer.lookahead()->type == RP) {
-						lexer.get_token();
-					}
-					else {
-						//throw("except ')'");
-						root = nullptr;
-						break;
-					}
 				}
 				else {
-					//throw("except '('");
-					root = nullptr;
-				}
-				if(exp0 == nullptr) {
-					root = nullptr;
-					break;
-				}
-				root->insert_subtree(*exp0);
-				if(exp1 == nullptr) {
+					error_message +=
+						"except ',' after " + lexer.lookback()->name +
+						" but got " + lexer.lookahead()->name + "\n";
+					//throw("except ','");
 					root = nullptr;
 					break;
 				}
-				root->insert_subtree(*exp1);
-				
+				exp1 = parse_add();
+				if(lexer.lookahead()->type == RP) {
+					lexer.get_token();
+				}
+				else {
+					error_message +=
+						"except ')' after " + lexer.lookback()->name +
+						" but got " + lexer.lookahead()->name + "\n";
+					//throw("except ')'");
+					root = nullptr;
+					break;
+				}
 			}
-			break;
-			default:
-				root = parse_primary();
+			else {
+				error_message +=
+					"except '(' after " + lexer.lookback()->name +
+					" but got " + lexer.lookahead()->name + "\n";
+				//throw("except '('");
+				root = nullptr;
+			}
+			if(exp0 == nullptr) {
+				root = nullptr;
 				break;
 			}
+			root->insert_subtree(*exp0);
+			if(exp1 == nullptr) {
+				root = nullptr;
+				break;
+			}
+			root->insert_subtree(*exp1);
+
+		}
+		break;
+		default:
+			root = parse_primary();
+			break;
 		}
 		return root;
 	}
@@ -381,6 +392,9 @@ namespace chis {
 		expr_node *root = nullptr;
 		if(!lexer.is_end()) {
 			switch(lexer.lookahead()->type) {
+			case ERROR:
+				error_message += "it's error_exp\n";
+				break;
 			case ID:
 			case CONST:
 			{
@@ -395,21 +409,35 @@ namespace chis {
 					lexer.get_token();
 				}
 				else {
+					error_message += 
+						"except ')' after " + lexer.lookback()->name 
+						+ " but got " + lexer.lookahead()->name + "\n";
 					//throw("except ')'");
 					root = nullptr;
 				}
 			}
 				break;
 			default:
+				error_message +=
+					"except ID or CONST or '(' after " + lexer.lookback()->name +
+					" but got " + lexer.lookahead()->name + "\n";
 				break;
 			}
+		}
+		else if(lexer.lookback()->name != "ERROR") {
+			error_message +=
+				"except ID or CONST or (additive_exp) after " + lexer.lookback()->name + "\n";
 		}
 		return root;
 	}
 
 	Expr Expr::reverse_parse(const expr_node *subroot) {
-		//TODO 表达式化简
+		if(!subroot) {
+			return Expr("ERROR");
+		}
 		switch(subroot->type) {
+		case ERROR:
+			return Expr("ERROR");
 		case ID:
 		case CONST:
 			return Expr(subroot->name);
@@ -467,14 +495,18 @@ namespace chis {
 				reverse_parse(subroot->subtree.back()),
 				subroot->type, subroot->name);
 		default:
-			//TODO
-			throw("fuck");
+			error_message
+				+= subroot->name + "is unkown symbol.\n";
 			break;
 		}
 	}
 	Expr Expr::diff(const expr_node *subroot, const std::string &x) {
-		//TODO
+		if(!subroot) {
+			return Expr("ERROR");
+		}
 		switch(subroot->type) {
+		case ERROR:
+			return Expr("ERROR");
 		case ID:
 			if(subroot->name == x) {
 				return Expr("1");
@@ -485,6 +517,9 @@ namespace chis {
 			return nega(diff(subroot->subtree.front(), x));
 		case POSI:
 			return diff(subroot->subtree.front(), x);
+		case EQU:
+			return 
+				equal(diff(subroot->subtree.front(), x) , diff(subroot->subtree.back(), x));
 		case ADD:
 			return diff(subroot->subtree.front(), x) + diff(subroot->subtree.back(), x);
 		case SUB:
@@ -588,12 +623,20 @@ namespace chis {
 		case LN:
 			return Expr("1") / standardization(subroot->subtree.front()) * diff(subroot->subtree.front(), x);
 		default:
-			throw("fuck");
+			error_message
+				+= subroot->name + " is undifferentiable.\n";
+			//throw("fuck");
 			break;
 		}
+		return Expr("ERROR");
 	}
 	Expr Expr::standardization(const expr_node *subroot) {
+		if(!subroot) {
+			return Expr("ERROR");
+		}
 		switch(subroot->type) {
+		case ERROR:
+			return Expr("ERROR");
 		case ID:
 		case CONST:
 			return Expr(subroot->name);
@@ -631,8 +674,19 @@ namespace chis {
 			);
 			Expr ret("0");
 			for(auto &i : nx) {
-
-				ret = ret + i;
+				// x+y + y
+				// +
+				//x y
+				if(ret.root->type == ADD &&
+					equal(ret.root->subtree[1], i.root)) {
+					ret = 
+						(standardization(ret.root->subtree[1]) + i) 
+						+ standardization(ret.root->subtree[0]);
+				}
+				
+				else {
+					ret = ret + i;
+				}
 			}
 			return ret;
 		}
@@ -652,13 +706,13 @@ namespace chis {
 					addi.push(addi.front()->subtree[0]);
 				}
 				else {
-					nx.push_back(reverse_parse(addi.front()->subtree[0]));
+					nx.push_back(standardization(addi.front()->subtree[0]));
 				}
 				if(addi.front()->subtree[1]->type == MUL) {
 					addi.push(addi.front()->subtree[1]);
 				}
 				else {
-					nx.push_back(reverse_parse(addi.front()->subtree[1]));
+					nx.push_back(standardization(addi.front()->subtree[1]));
 				}
 				addi.pop();
 			}
@@ -670,35 +724,16 @@ namespace chis {
 			);
 			Expr ret("1");
 			for(auto &i : nx) {
-				if(i.root->type == ADD) {
+				ret = standardization(ret.root);
+				if(ret.root->type == ADD) {
 					ret =
-						(ret * standardization(i.root->subtree[0]))
-						+ (ret * standardization(i.root->subtree[1]));
-				}
-				else if(i.root->type == SUB) {
-					ret =
-						(ret * standardization(i.root->subtree[0]))
-						- (ret * standardization(i.root->subtree[1]));
-				}
-				else if(ret.root->type == ADD) {
-					ret =
-						(i * standardization(ret.root->subtree[0]))
-						+ (i * standardization(ret.root->subtree[1]));
+						(i * standardization(ret.root->subtree[0])).standardization()
+						+ (i * standardization(ret.root->subtree[1])).standardization();
 				}
 				else if(ret.root->type == SUB) {
 					ret =
-						(i * standardization(ret.root->subtree[0]))
-						- (i * standardization(ret.root->subtree[1]));
-				}
-				else if(
-					ret.root->type == MUL 
-					&& equal(ret.root->subtree[0], i.root)) {
-					ret = standardization(ret.root->subtree[1]) * (i ^ Expr("2"));
-				}
-				else if(
-					ret.root->type == MUL
-					&& equal(ret.root->subtree[1], i.root)) {
-					ret = standardization(ret.root->subtree[0]) * (i ^ Expr("2"));
+						(i * standardization(ret.root->subtree[0])).standardization()
+						- (i * standardization(ret.root->subtree[1])).standardization();
 				}
 				else {
 					ret = ret * i;
@@ -709,7 +744,7 @@ namespace chis {
 		case DIV:
 			return
 				standardization(subroot->subtree[0])
-				/ standardization(subroot->subtree[1]);
+				* (standardization(subroot->subtree[1]) ^ Expr("-1"));
 		case MOD:
 			return
 				standardization(subroot->subtree[0])
@@ -719,6 +754,7 @@ namespace chis {
 				standardization(subroot->subtree[0])
 				^ standardization(subroot->subtree[1]);
 		case NEGA:
+
 			return nega(standardization(subroot->subtree.front()));
 		case POSI:
 			return standardization(subroot->subtree.front());
@@ -743,8 +779,10 @@ namespace chis {
 				standardization(subroot->subtree.back()),
 				subroot->type, subroot->name);
 		default:
-			throw("fuck");
+			error_message
+				+= subroot->name + "is unkown symbol.\n";
 			break;
 		}
+		return Expr("ERROR");
 	}
 }
