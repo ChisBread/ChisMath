@@ -30,6 +30,7 @@ namespace chis {
 	int max_typeid = MAX;
 	std::string Expr::error_message;
 	Expr::expr_node Expr::ERROR_NODE(ERROR, "ERROR");
+	Expr::expr_node Expr::NIL(CONST, "0");
 	double to_double(const std::string &num) {
 		std::strstream strs;
 		strs << num;
@@ -88,8 +89,12 @@ namespace chis {
 			break;
 		default:
 			if(*scan_index >= '0' && *scan_index <= '9' || (*scan_index == '.')) {
+				int ndot = 2;
+				if(*scan_index == '.') {
+					--ndot;
+				}
 				++scan_index;
-				for(int ndot = 2; ndot && scan_index != end; ++scan_index) {
+				for(; ndot && scan_index != end; ++scan_index) {
 					if(*scan_index == '.') {
 						--ndot;
 					}
@@ -100,7 +105,13 @@ namespace chis {
 					}
 					name.push_back(*scan_index);
 				}
-				token_buffer.push(expr_node(CONST, name));
+				if(name == ".") {
+					error_message += "'.' is not a CONST.\n";
+					token_buffer.push(ERROR_NODE);
+				}
+				else {
+					token_buffer.push(expr_node(CONST, name));
+				}
 			}
 			else if(
 				(*scan_index >= 'A' && *scan_index <= 'Z') 
@@ -127,7 +138,8 @@ namespace chis {
 				}
 			}
 			else {
-				error_message += name + "is unkown symbol.";
+				error_message += name + "is unkown symbol.\n";
+				token_buffer.push(ERROR_NODE);
 			}
 			break;
 		}
@@ -345,7 +357,6 @@ namespace chis {
 					error_message +=
 						"except ',' after " + lexer.lookback()->name +
 						" but got " + lexer.lookahead()->name + "\n";
-					//throw("except ','");
 					root = nullptr;
 					break;
 				}
@@ -357,7 +368,6 @@ namespace chis {
 					error_message +=
 						"except ')' after " + lexer.lookback()->name +
 						" but got " + lexer.lookahead()->name + "\n";
-					//throw("except ')'");
 					root = nullptr;
 					break;
 				}
@@ -366,7 +376,6 @@ namespace chis {
 				error_message +=
 					"except '(' after " + lexer.lookback()->name +
 					" but got " + lexer.lookahead()->name + "\n";
-				//throw("except '('");
 				root = nullptr;
 			}
 			if(exp0 == nullptr) {
@@ -393,7 +402,9 @@ namespace chis {
 		if(!lexer.is_end()) {
 			switch(lexer.lookahead()->type) {
 			case ERROR:
-				error_message += "it's error_exp\n";
+				error_message +=
+					"except ID or CONST or (additive_exp) after " 
+					+ lexer.lookback()->name + " but got ERROR\n";
 				break;
 			case ID:
 			case CONST:
@@ -443,7 +454,7 @@ namespace chis {
 			return Expr(subroot->name);
 		case EQU:
 			return
-				equal(
+				make_equal(
 				reverse_parse(subroot->subtree.front())
 				, reverse_parse(subroot->subtree.back()));
 		case ADD:
@@ -475,20 +486,32 @@ namespace chis {
 		case POSI:
 			return reverse_parse(subroot->subtree.front());
 		case SIN:
+			return sin(reverse_parse(subroot->subtree.front()));
 		case COS:
+			return cos(reverse_parse(subroot->subtree.front()));
 		case TAN:
+			return tan(reverse_parse(subroot->subtree.front()));
 		case COT:
+			return cot(reverse_parse(subroot->subtree.front()));
 		case ARCSIN:
+			return arcsin(reverse_parse(subroot->subtree.front()));
 		case ARCCOS:
+			return arccos(reverse_parse(subroot->subtree.front()));
 		case ARCTAN:
+			return arctan(reverse_parse(subroot->subtree.front()));
 		case ARCCOT:
+			return arccot(reverse_parse(subroot->subtree.front()));
 		case LN:
-			return call_func(
-				reverse_parse(subroot->subtree.front()),
-				subroot->type, subroot->name);
+			return ln(reverse_parse(subroot->subtree.front()));
 		case LOG:
+			return log(reverse_parse(subroot->subtree.front()),
+				reverse_parse(subroot->subtree.back()));
 		case MAX:
+			return max(reverse_parse(subroot->subtree.front()),
+				reverse_parse(subroot->subtree.back()));
 		case MIN:
+			return min(reverse_parse(subroot->subtree.front()),
+				reverse_parse(subroot->subtree.back()));
 		case DIFF:
 			return call_func(
 				reverse_parse(subroot->subtree.front()),
@@ -497,6 +520,7 @@ namespace chis {
 		default:
 			error_message
 				+= subroot->name + "is unkown symbol.\n";
+			return Expr("ERROR");
 			break;
 		}
 	}
@@ -519,7 +543,7 @@ namespace chis {
 			return diff(subroot->subtree.front(), x);
 		case EQU:
 			return 
-				equal(diff(subroot->subtree.front(), x) , diff(subroot->subtree.back(), x));
+				make_equal(diff(subroot->subtree.front(), x), diff(subroot->subtree.back(), x));
 		case ADD:
 			return diff(subroot->subtree.front(), x) + diff(subroot->subtree.back(), x);
 		case SUB:
@@ -642,7 +666,7 @@ namespace chis {
 			return Expr(subroot->name);
 		case EQU:
 			return
-				equal(
+				make_equal(
 				standardization(subroot->subtree[0])
 				, standardization(subroot->subtree[1]));
 		case ADD:
@@ -784,5 +808,156 @@ namespace chis {
 			break;
 		}
 		return Expr("ERROR");
+	}
+	std::list<Expr> Expr::stdexpr(const expr_node *st) {
+		if(!st) {
+			return std::list<Expr>(1,Expr("ERROR"));
+		}
+		switch(st->type) {
+		case ERROR:
+			return std::list<Expr>(1, Expr("ERROR"));
+		case ID:
+		case CONST:
+			return std::list<Expr>(1, Expr(st->name));
+		case ADD:
+		{
+			std::list<Expr> &&subexpr = stdexpr(st->subtree[0]);
+			subexpr.merge(stdexpr(st->subtree[1]));
+			return subexpr;
+		}
+		case SUB:
+		{
+			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
+			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			for(auto &i:exprb) {
+				i = nega(i);
+			}
+			expra.merge(exprb);
+			return expra;
+		}
+		case MUL:
+		{
+			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
+			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			std::list<Expr> ret;
+			for(auto &i: exprb) {
+				for(auto &j : expra) {
+					if(i < j) {
+						ret.push_back(i*j);
+					}
+					else {
+						ret.push_back(j*i);
+					}
+				}
+			}
+			ret.sort();
+			return ret;
+		}
+		case DIV:
+		{
+			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
+			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			Expr b = to_expr(exprb) ^ Expr("-1");
+			for(auto &i : expra) {
+				if(i < b) {
+					i = i * b;
+				}
+				else {
+					i = b * i;
+				}
+			}
+			expra.sort();
+			return expra;
+		} 
+		case MOD:
+		{
+			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
+			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			Expr a(to_expr(expra));
+			Expr b(to_expr(exprb));
+			return std::list<Expr>(1, a % b);
+		}
+		case POW:
+		{
+			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
+			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			std::list<Expr> ret;
+			if(
+				//(x1+x2...+xn)^m
+				expra.size() > 1
+				//exprbÎªÕûÊý
+				&& exprb.size() == 1 
+				&& exprb.front().root->type == CONST
+				&& exprb.front().root->name.find('.') == std::string::npos
+				&& exprb.front().root->name.find('-') == std::string::npos) {
+				int n = to_double(exprb.front().root->name);
+				ret = expra;
+				for(int k = 1; k < n; ++k) {
+					std::list<Expr> temp;
+					for(auto &i : expra) {
+						for(auto &j : ret) {
+							if(i<j) {
+								temp.push_back(i*j);
+							}
+							else {
+								temp.push_back(j*i);
+							}
+						}
+					}
+					ret = temp;
+				}
+			}
+			else {
+				Expr a(to_expr(expra));
+				Expr b(to_expr(exprb));
+				ret.push_back(a^b);
+			}
+			ret.sort();
+			return ret;
+		}
+		case NEGA:
+		{
+			std::list<Expr> &&expr = stdexpr(st->subtree[0]);
+			for(auto &i : expr) {
+				i = nega(i);
+			}
+			return expr;
+		}
+		case POSI:
+			return 	stdexpr(st->subtree[0]);
+		case SIN:
+		case COS:
+		case TAN:
+		case COT:
+		case ARCSIN:
+		case ARCCOS:
+		case ARCTAN:
+		case ARCCOT:
+		case LN:
+		{
+			std::list<Expr> &&expr = stdexpr(st->subtree[0]);
+			Expr a(to_expr(expr));
+
+			return std::list<Expr>(1, call_func(a, st->type, st->name));
+		}
+		case LOG:
+		case MAX:
+		case MIN:
+		case DIFF:
+		{
+			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
+			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+
+			Expr a(to_expr(expra));
+			Expr b(to_expr(exprb));
+
+			return std::list<Expr>(1, call_func(a, b, st->type, st->name));
+		}
+		default:
+			error_message
+				+= st->name + "is unkown symbol.\n";
+			break;
+		}
+		return std::list<Expr>(1, Expr("ERROR"));
 	}
 }
