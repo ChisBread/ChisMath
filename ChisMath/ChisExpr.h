@@ -34,7 +34,7 @@ namespace chis {
 	
 	double to_double(const std::string &num);
 	std::string to_string(double num);
-
+	
 	class Expr {
 		class expr_parser;
 		class expr_node {
@@ -354,7 +354,7 @@ namespace chis {
 			}
 			//x + x = 2x
 			if(equal(this->root, b.root)) {
-				return opt(Expr("2"), MUL, "*", b);
+				return Expr("2") * b;
 			}
 			//x + -x = 0
 			if(b.root->type == NEGA && equal(this->root, b.root->subtree[0])) {
@@ -449,10 +449,10 @@ namespace chis {
 					return reverse_parse(b.root->subtree[0])
 						^ (reverse_parse(this->root->subtree[1]) + reverse_parse(b.root->subtree[1]));
 				}
-				// gx^a * fx^a = (fx*gx)^a
+				// gx^a * fx^a = (gx*fx)^a
 				if(equal(b.root->subtree[1], this->root->subtree[1])) {
 					return 
-						(reverse_parse(b.root->subtree[0]) * reverse_parse(this->root->subtree[0])) 
+						(reverse_parse(this->root->subtree[0])) * reverse_parse(b.root->subtree[0])
 						^ reverse_parse(b.root->subtree[1]);
 				}
 
@@ -723,28 +723,71 @@ namespace chis {
 			Expr &&expr = diff(reverse_parse(y.root).root, x);
 			return expr;
 		}
-		static Expr to_expr(std::list<Expr> exprs) {
+		static bool same_plynomials(const Expr &a, const Expr &b) {
+			//同属一个整式
+			if(a.root->type == CONST && b.root->type == CONST) {
+				return true;
+			}
+			if(a.root->type == ID && b.root->type == ID) {
+				return a.root->name == b.root->name;
+			}
+			if(a.root->type == CONST && b.root->type == MUL) {
+				if(b.root->subtree[0]->type == CONST) {
+					return equal(a.root, b.root->subtree[1]);
+				}
+				if(b.root->subtree[1]->type == CONST) {
+					return equal(a.root, b.root->subtree[0]);
+				}
+			}
+			if(b.root->type == CONST && a.root->type == MUL) {
+				if(a.root->subtree[0]->type == CONST) {
+					return equal(b.root, a.root->subtree[1]);
+				}
+				if(a.root->subtree[1]->type == CONST) {
+					return equal(b.root, a.root->subtree[0]);
+				}
+			}
+			if(a.root->type == MUL && b.root->type == MUL) {
+				if(
+					a.root->subtree[0]->type == CONST && 
+					b.root->subtree[0]->type == CONST) {
+					return equal(b.root->subtree[1], a.root->subtree[1]);
+				}
+			}
+			return equal(a, b);
+		}
+		static Expr to_expr(std::list<std::list<Expr>> &exprs) {
+			std::list<Expr> addexp;
+			for(auto &i : exprs) {
+				i.sort();
+				std::list<Expr> unequ;
+				auto bg = i.begin();
+				int n = 0;
+				for(auto itor = i.begin(); itor != i.end(); ++itor) {
+					auto next = itor;
+					++next;
+					++n;
+					if(next == i.end() || !same_plynomials(*itor, *next)) {
+						unequ.push_back(*itor ^ Expr(to_string(n)));
+						n = 0;
+					}
+				}
+				addexp.push_back(Expr("1"));
+				for(auto &j : unequ) {
+					addexp.back() = addexp.back() * j;
+				}
+			}
+			addexp.sort();
 			std::list<Expr> unequ;
-			auto bg = exprs.begin();
-			for(auto itor = exprs.begin(); itor != exprs.end(); ++itor) {
+			auto bg = addexp.begin();
+			int n = 0;
+			for(auto itor = addexp.begin(); itor != addexp.end(); ++itor) {
 				auto next = itor;
 				++next;
-				if(next != exprs.end()
-					&& itor->root->type == MUL
-					&& next->root->type == MUL
-					&& itor->root->subtree[0]->type == CONST
-					&& next->root->subtree[0]->type == CONST
-					&& equal(next->root->subtree[1], itor->root->subtree[1])
-					) {
-					continue;
-				}
-				if(next == exprs.end() || !equal(*itor, *next)) {
-					Expr a("0");
-					while(bg != next) {
-						a = a + *bg;
-						++bg;
-					}
-					unequ.push_back(a);
+				++n;
+				if(next == addexp.end() || !same_plynomials(*itor, *next)) {
+					unequ.push_back(Expr(to_string(n))* *itor);
+					n = 0;
 				}
 			}
 			Expr ret("0");
@@ -766,11 +809,6 @@ namespace chis {
 			swap(reverse_parse(root));
 			return *this;
 		}
-		Expr& standardization() {
-			swap(standardization(root));
-			return *this;
-		}
-
 		const std::string& errors() const {
 			return error_message;
 		}
@@ -778,7 +816,7 @@ namespace chis {
 			error_message.clear();
 		}
 		Expr stdexpr() const{
-			std::list<Expr> &&expr = stdexpr(root);
+			auto &&expr = stdexpr(root);
 			return to_expr(expr);
 		}
 		void print() {
@@ -835,37 +873,22 @@ namespace chis {
 	private:
 		static Expr reverse_parse(const expr_node *subroot);
 		static bool less_than(const expr_node *a, const expr_node *b) {
-			Expr &&ea = reverse_parse(a), &&eb = reverse_parse(b);
 			if(a->type == CONST && b->type != CONST) {
 				return true;
 			}
 			if(a->type != CONST && b->type == CONST) {
 				return false;
 			}
-			if(ea.node_pool.size() < eb.node_pool.size()) {
-				return true;
-			}
-			else if(ea.node_pool.size() == eb.node_pool.size()) {
-				auto ba = ea.node_pool.begin();
-				auto bb = eb.node_pool.begin();
-				for(; ba != ea.node_pool.end(); ++ba, ++bb) {
-					if(ba->name.size() < bb->name.size()) {
-						return true;
-					}
-					else if(ba->name.size() == bb->name.size()) {
-						if(ba->name < bb->name) {
-							return true;
-						}
-						if(ba->name > bb->name) {
-							break;
-						}
-					}
-					else {
-						break;
-					}
+			if(a->type == CONST && b->type == CONST) {
+				if(a->name.size() < b->name.size()) {
+					return true;
 				}
+				else if(a->name.size() == b->name.size()) {
+					return a->name < b->name;
+				}
+				return false;
 			}
-			return false;
+			return sufexpr(a) < sufexpr(b);
 		}
 		static bool equal(const expr_node *a, const expr_node *b) {
 			return sufexpr(a)==sufexpr(b);
@@ -882,14 +905,12 @@ namespace chis {
 					expr += i;
 				}
 			}
-			return expr;
+			return std::move(expr);
 		}
 		static bool equal(const Expr &a, const Expr &b) {
 			return equal(a.root, b.root);
 		}
-
-		static Expr standardization(const expr_node *subroot);
-		static std::list<Expr> stdexpr(const expr_node *subroot);
+		static std::list<std::list<Expr>> stdexpr(const expr_node *subroot);
 		static Expr diff(const expr_node *subroot, const std::string &x);
 		static std::string error_message;
 		static expr_node ERROR_NODE;

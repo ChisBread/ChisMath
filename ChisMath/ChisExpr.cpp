@@ -550,22 +550,22 @@ namespace chis {
 			return diff(subroot->subtree.front(), x) - diff(subroot->subtree.back(), x);
 		case MUL:
 			return
-				diff(subroot->subtree.front(), x) * standardization(subroot->subtree.back())
-				+ diff(subroot->subtree.back(), x) * standardization(subroot->subtree.front());
+				diff(subroot->subtree.front(), x) * reverse_parse(subroot->subtree.back())
+				+ diff(subroot->subtree.back(), x) * reverse_parse(subroot->subtree.front());
 		case DIV:
 		{
 			// q / p
 			// dq / p - (q * dp / p^2))
-			Expr &&q = standardization(subroot->subtree.front());
-			Expr &&p = standardization(subroot->subtree.back());
+			Expr &&q = reverse_parse(subroot->subtree.front());
+			Expr &&p = reverse_parse(subroot->subtree.back());
 			Expr &&dq = diff(subroot->subtree.front(), x);
 			Expr &&dp = diff(subroot->subtree.back(), x);
 			return dq / p - (q * dp / (p ^ Expr("2")));
 		}
 		case POW:
 		{
-			Expr &&power = standardization(subroot->subtree.back());
-			Expr &&base = standardization(subroot->subtree.front());
+			Expr &&power = reverse_parse(subroot->subtree.back());
+			Expr &&base = reverse_parse(subroot->subtree.front());
 			//power中没有自变量x d(g(x)^c) = c*(g(x)^(c-1))*g'(x)dx
 			if(power.id_type.find(x) == power.id_type.end()) {
 				return power * (base ^ (power - Expr("1"))) * diff(subroot->subtree.front(), x);
@@ -577,24 +577,24 @@ namespace chis {
 			//d(g^f) -> e^(ln(g)*f)*d(ln(g)*f)
 			else {
 				Expr &&lng_x_f = ln(base)*power;
-				lng_x_f.standardization();
+				lng_x_f.reverse_parse();
 				return (Expr("e") ^ lng_x_f)*diff(lng_x_f.root, x);
 			}
 		}
 		case SIN:
 			return
-				cos(standardization(subroot->subtree.front()))
+				cos(reverse_parse(subroot->subtree.front()))
 				* diff(subroot->subtree.front(), x);
 		case COS:
 			return
 				nega(
-				sin(standardization(subroot->subtree.front())))
+				sin(reverse_parse(subroot->subtree.front())))
 				* diff(subroot->subtree.front(), x);
 		case TAN:
 			return
 				(Expr("1")
 				/ (
-				cos(standardization(subroot->subtree.front())) ^ Expr("2")
+				cos(reverse_parse(subroot->subtree.front())) ^ Expr("2")
 				))
 				* diff(subroot->subtree.front(), x);
 		case COT:
@@ -602,14 +602,14 @@ namespace chis {
 				nega(
 				(Expr("1")
 				/ (
-				sin(standardization(subroot->subtree.front())) ^ Expr("2")
+				sin(reverse_parse(subroot->subtree.front())) ^ Expr("2")
 				)))
 				* diff(subroot->subtree.front(), x);
 		case ARCSIN:
 			return
 				Expr("1") /
 				(
-				(Expr("1") - ((standardization(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") - ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				)
 				* diff(subroot->subtree.front(), x);
@@ -617,7 +617,7 @@ namespace chis {
 			return
 				nega(Expr("1") /
 				(
-				(Expr("1") - ((standardization(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") - ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				))
 				* diff(subroot->subtree.front(), x);
@@ -625,7 +625,7 @@ namespace chis {
 			return
 				Expr("1") /
 				(
-				(Expr("1") + ((standardization(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") + ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				)
 				* diff(subroot->subtree.front(), x);
@@ -633,19 +633,19 @@ namespace chis {
 			return
 				nega(Expr("1") /
 				(
-				(Expr("1") + ((standardization(subroot->subtree.front())) ^ Expr("2")))
+				(Expr("1") + ((reverse_parse(subroot->subtree.front())) ^ Expr("2")))
 				^ Expr("0.5")
 				))
 				* diff(subroot->subtree.front(), x);
 		case LOG:
 		{
-			Expr &&lnx_div_lna = ln(standardization(subroot->subtree.back()))
-				/ ln(standardization(subroot->subtree.front()));
+			Expr &&lnx_div_lna = ln(reverse_parse(subroot->subtree.back()))
+				/ ln(reverse_parse(subroot->subtree.front()));
 			return diff(lnx_div_lna.root, x);
 		}
 		break;
 		case LN:
-			return Expr("1") / standardization(subroot->subtree.front()) * diff(subroot->subtree.front(), x);
+			return Expr("1") / reverse_parse(subroot->subtree.front()) * diff(subroot->subtree.front(), x);
 		default:
 			error_message
 				+= subroot->name + " is undifferentiable.\n";
@@ -654,272 +654,103 @@ namespace chis {
 		}
 		return Expr("ERROR");
 	}
-	Expr Expr::standardization(const expr_node *subroot) {
-		if(!subroot) {
-			return Expr("ERROR");
-		}
-		switch(subroot->type) {
-		case ERROR:
-			return Expr("ERROR");
-		case ID:
-		case CONST:
-			return Expr(subroot->name);
-		case EQU:
-			return
-				make_equal(
-				standardization(subroot->subtree[0])
-				, standardization(subroot->subtree[1]));
-		case ADD:
-		{
-			std::vector<Expr> nx;
-			std::queue<const expr_node*> addi;
-			addi.push(subroot);
-			//取出所有被加式到nx
-			while(!addi.empty()) {
-				if(addi.front()->subtree[0]->type == ADD) {
-					addi.push(addi.front()->subtree[0]);
-				}
-				else {
-					nx.push_back(standardization(addi.front()->subtree[0]));
-				}
-				if(addi.front()->subtree[1]->type == ADD) {
-					addi.push(addi.front()->subtree[1]);
-				}
-				else {
-					nx.push_back(standardization(addi.front()->subtree[1]));
-				}
-				addi.pop();
-			}
-
-			std::sort(nx.begin(), nx.end(),
-				[](const Expr &a, const Expr &b) {
-				return a < b;
-			}
-			);
-			Expr ret("0");
-			for(auto &i : nx) {
-				// x+y + y
-				// +
-				//x y
-				if(ret.root->type == ADD &&
-					equal(ret.root->subtree[1], i.root)) {
-					ret = 
-						(standardization(ret.root->subtree[1]) + i) 
-						+ standardization(ret.root->subtree[0]);
-				}
-				
-				else {
-					ret = ret + i;
-				}
-			}
-			return ret;
-		}
-		case SUB:
-			return
-				standardization(subroot->subtree[0])
-				- standardization(subroot->subtree[1]);
-		case MUL:
-		{
-			// TODO 去括号
-			std::vector<Expr> nx;
-			std::queue<const expr_node*> addi;
-			addi.push(subroot);
-			//取出所有被乘式到nx
-			while(!addi.empty()) {
-				if(addi.front()->subtree[0]->type == MUL) {
-					addi.push(addi.front()->subtree[0]);
-				}
-				else {
-					nx.push_back(standardization(addi.front()->subtree[0]));
-				}
-				if(addi.front()->subtree[1]->type == MUL) {
-					addi.push(addi.front()->subtree[1]);
-				}
-				else {
-					nx.push_back(standardization(addi.front()->subtree[1]));
-				}
-				addi.pop();
-			}
-
-			std::sort(nx.begin(), nx.end(),
-				[](const Expr &a, const Expr &b) {
-				return a < b;
-			}
-			);
-			Expr ret("1");
-			for(auto &i : nx) {
-				ret = standardization(ret.root);
-				if(ret.root->type == ADD) {
-					ret =
-						(i * standardization(ret.root->subtree[0])).standardization()
-						+ (i * standardization(ret.root->subtree[1])).standardization();
-				}
-				else if(ret.root->type == SUB) {
-					ret =
-						(i * standardization(ret.root->subtree[0])).standardization()
-						- (i * standardization(ret.root->subtree[1])).standardization();
-				}
-				else {
-					ret = ret * i;
-				}
-			}
-			return ret;
-		}
-		case DIV:
-			return
-				standardization(subroot->subtree[0])
-				* (standardization(subroot->subtree[1]) ^ Expr("-1"));
-		case MOD:
-			return
-				standardization(subroot->subtree[0])
-				% standardization(subroot->subtree[1]);
-		case POW:
-			return
-				standardization(subroot->subtree[0])
-				^ standardization(subroot->subtree[1]);
-		case NEGA:
-
-			return nega(standardization(subroot->subtree.front()));
-		case POSI:
-			return standardization(subroot->subtree.front());
-		case SIN:
-		case COS:
-		case TAN:
-		case COT:
-		case ARCSIN:
-		case ARCCOS:
-		case ARCTAN:
-		case ARCCOT:
-		case LN:
-			return call_func(
-				standardization(subroot->subtree.front()),
-				subroot->type, subroot->name);
-		case LOG:
-		case MAX:
-		case MIN:
-		case DIFF:
-			return call_func(
-				standardization(subroot->subtree.front()),
-				standardization(subroot->subtree.back()),
-				subroot->type, subroot->name);
-		default:
-			error_message
-				+= subroot->name + "is unkown symbol.\n";
-			break;
-		}
-		return Expr("ERROR");
-	}
-	std::list<Expr> Expr::stdexpr(const expr_node *st) {
+	std::list<std::list<Expr>> Expr::stdexpr(const expr_node *st) {
 		if(!st) {
-			return std::list<Expr>(1,Expr("ERROR"));
+			return { { Expr("ERROR") } };
 		}
 		switch(st->type) {
 		case ERROR:
-			return std::list<Expr>(1, Expr("ERROR"));
+			return{ { Expr("ERROR") } };
 		case ID:
 		case CONST:
-			return std::list<Expr>(1, Expr(st->name));
+			return{ { Expr(st->name) } };
 		case ADD:
 		{
-			std::list<Expr> &&subexpr = stdexpr(st->subtree[0]);
-			subexpr.merge(stdexpr(st->subtree[1]));
-			return subexpr;
+			auto &&subexpr = stdexpr(st->subtree[0]);
+			subexpr.splice(subexpr.begin(), stdexpr(st->subtree[1]));
+			return std::move(subexpr);
 		}
 		case SUB:
 		{
-			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
-			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0]);
+			auto &&exprb = stdexpr(st->subtree[1]);
 			for(auto &i:exprb) {
-				i = nega(i);
+				i.push_front(Expr("-1"));
 			}
-			expra.merge(exprb);
-			return expra;
+			expra.splice(expra.begin(), exprb);
+			return std::move(expra);
 		}
 		case MUL:
 		{
-			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
-			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
-			std::list<Expr> ret;
-			for(auto &i: exprb) {
-				for(auto &j : expra) {
-					if(i < j) {
-						ret.push_back(i*j);
-					}
-					else {
-						ret.push_back(j*i);
-					}
+			auto &&expra = stdexpr(st->subtree[0]);
+			auto &&exprb = stdexpr(st->subtree[1]);
+			std::list<std::list<Expr>> ret;
+			for(auto i: exprb) {
+				for(auto j : expra) {
+					i.merge(j);
+					ret.push_back(i);
 				}
 			}
-			ret.sort();
-			return ret;
+			return std::move(ret);
 		}
 		case DIV:
 		{
-			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
-			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0]);
+			auto &&exprb = stdexpr(st->subtree[1]);
 			Expr b = to_expr(exprb) ^ Expr("-1");
 			for(auto &i : expra) {
-				if(i < b) {
-					i = i * b;
-				}
-				else {
-					i = b * i;
-				}
+				i.push_front(b);
+				i.sort();
 			}
-			expra.sort();
-			return expra;
+			return std::move(expra);
 		} 
 		case MOD:
 		{
-			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
-			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0]);
+			auto &&exprb = stdexpr(st->subtree[1]);
 			Expr a(to_expr(expra));
 			Expr b(to_expr(exprb));
-			return std::list<Expr>(1, a % b);
+			return { { 1, a % b } };
 		}
 		case POW:
 		{
-			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
-			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
-			std::list<Expr> ret;
+			auto &&expra = stdexpr(st->subtree[0]);
+			auto &&exprb = stdexpr(st->subtree[1]);
+			std::list<std::list<Expr>> ret;
 			if(
 				//(x1+x2...+xn)^m
 				expra.size() > 1
 				//exprb为整数
-				&& exprb.size() == 1 
-				&& exprb.front().root->type == CONST
-				&& exprb.front().root->name.find('.') == std::string::npos
-				&& exprb.front().root->name.find('-') == std::string::npos) {
-				int n = to_double(exprb.front().root->name);
+				&& exprb.size() == 1 && exprb.front().size() == 1
+				&& exprb.front().front().root->type == CONST
+				&& exprb.front().front().root->name.find('.') == std::string::npos
+				&& exprb.front().front().root->name.find('-') == std::string::npos) {
+				int n = to_double(exprb.front().front().root->name);
 				ret = expra;
 				for(int k = 1; k < n; ++k) {
-					std::list<Expr> temp;
-					for(auto &i : expra) {
-						for(auto &j : ret) {
-							if(i<j) {
-								temp.push_back(i*j);
-							}
-							else {
-								temp.push_back(j*i);
-							}
+					std::list<std::list<Expr>> temp;
+					for(auto i : expra) { 
+						for(auto j : ret) {
+							auto x = i;
+							j.merge(x);
+							temp.push_back(j);
 						}
 					}
-					ret = temp;
+					ret.swap(temp);
 				}
 			}
 			else {
 				Expr a(to_expr(expra));
 				Expr b(to_expr(exprb));
-				ret.push_back(a^b);
+				ret.push_back({ a^b });
 			}
-			ret.sort();
-			return ret;
+			return std::move(ret);
 		}
 		case NEGA:
 		{
-			std::list<Expr> &&expr = stdexpr(st->subtree[0]);
+			auto &&expr = stdexpr(st->subtree[0]);
 			for(auto &i : expr) {
-				i = nega(i);
+				i.push_front(Expr("-1"));
 			}
 			return expr;
 		}
@@ -935,29 +766,29 @@ namespace chis {
 		case ARCCOT:
 		case LN:
 		{
-			std::list<Expr> &&expr = stdexpr(st->subtree[0]);
+			auto &&expr = stdexpr(st->subtree[0]);
 			Expr a(to_expr(expr));
 
-			return std::list<Expr>(1, call_func(a, st->type, st->name));
+			return{ { call_func(a, st->type, st->name) } };
 		}
 		case LOG:
 		case MAX:
 		case MIN:
 		case DIFF:
 		{
-			std::list<Expr> &&expra = stdexpr(st->subtree[0]);
-			std::list<Expr> &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0]);
+			auto &&exprb = stdexpr(st->subtree[1]);
 
 			Expr a(to_expr(expra));
 			Expr b(to_expr(exprb));
 
-			return std::list<Expr>(1, call_func(a, b, st->type, st->name));
+			return { { call_func(a, b, st->type, st->name) } };
 		}
 		default:
 			error_message
 				+= st->name + "is unkown symbol.\n";
 			break;
 		}
-		return std::list<Expr>(1, Expr("ERROR"));
+		return{ { Expr("ERROR") } };
 	}
 }
