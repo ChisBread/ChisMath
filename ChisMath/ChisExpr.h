@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <list>
+#include <forward_list>
 #include <queue>
 #include <map>
 #include <set>
@@ -531,25 +532,26 @@ namespace chis {
 			}
 			return equal(a, b);
 		}
-		static Expr to_expr(std::list<std::list<Expr*>> &exprs) {
+		static Expr to_expr(
+			std::list<std::vector<std::pair<Expr*, int>>> &exprs) {
 			std::list<Expr> addexp;
 			for(auto &i : exprs) {
-				i.sort([](Expr *a, Expr *b) {
-					if(a == b) {
+				sort(i.begin(), i.end(), [](std::pair<Expr*, int> &a, std::pair<Expr*, int> &b) {
+					if(a.first == b.first) {
 						return false;
 					}
-					return *a < *b;
+					return *a.first < *b.first;
 				});
 				std::list<Expr> unequ;
-				auto bg = i.begin();
-				int n = 0;
-				for(auto itor = i.begin(); itor != i.end(); ++itor) {
-					auto next = itor;
-					++next;
-					++n;
-					if(next == i.end() || (*itor != *next && !same_plynomials(**itor, **next))) {
-						unequ.push_back(Expr(**itor) ^ Expr(to_string(n)));
-						n = 0;
+				
+				for(auto &j:i) {
+					//a1^n1*a2^n2....
+					if(j.first->root->type == CONST) {
+						unequ.push_back(Expr(to_string(
+							std::pow(to_double(j.first->root->name), j.second))));
+					}
+					else {
+						unequ.push_back(Expr(*j.first) ^ Expr(to_string(j.second)));
 					}
 				}
 				addexp.push_back(Expr("1"));
@@ -561,9 +563,9 @@ namespace chis {
 			std::set<Expr*> deleted;
 			for(auto &i:exprs) {
 				for(auto &j : i) {
-					if(deleted.find(j) == deleted.end()) {
-						delete j;
-						deleted.insert(j);
+					if(deleted.find(j.first) == deleted.end()) {
+						delete j.first;
+						deleted.insert(j.first);
 					}
 				}
 			}
@@ -576,7 +578,7 @@ namespace chis {
 				++next;
 				++n;
 				if(next == addexp.end() || !same_plynomials(*itor, *next)) {
-					unequ.push_back(Expr(to_string(n))* std::move(*itor));
+					unequ.push_back(std::move(*itor) * Expr(to_string(n)));
 					n = 0;
 				}
 			}
@@ -821,7 +823,7 @@ namespace chis {
 				return b._sufexpr == a._sufexpr;
 			}
 		}
-		static std::list<std::list<Expr*>> stdexpr(const expr_node *subroot);
+		static std::list<std::vector<std::pair<Expr*, int>>> stdexpr(const expr_node *subroot);
 		static Expr diff(const expr_node *subroot, const std::string &x);
 		static std::string error_message;
 		static expr_node ERROR_NODE;
