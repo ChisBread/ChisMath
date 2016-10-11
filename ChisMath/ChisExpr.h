@@ -31,13 +31,32 @@ namespace chis {
 	extern int max_typeid;
 	extern std::map<std::string, int> keyword;
 	extern std::map<int, int> prec_map;
-	
+	extern std::map<int, bool> exchangadble;
 	double to_double(const std::string &num);
 	std::string to_string(double num);
-	
+	class Expr;
+	Expr operator+(Expr &&a, Expr &&b);
+	Expr operator-(Expr &&a, Expr &&b);
+	Expr operator*(Expr &&a, Expr &&b);
+	Expr operator/(Expr &&a, Expr &&b);
+	Expr operator%(Expr &&a, Expr &&b);
+	Expr operator^(Expr &&a, Expr &&b);
+	//TODO const &
 	class Expr {
+		friend Expr operator+(Expr &&a, Expr &&b);
+		friend Expr operator-(Expr &&a, Expr &&b);
+		friend Expr operator*(Expr &&a, Expr &&b);
+		friend Expr operator/(Expr &&a, Expr &&b);
+		friend Expr operator%(Expr &&a, Expr &&b);
+		friend Expr operator^(Expr &&a, Expr &&b);
 		class expr_parser;
 		class expr_node {
+			friend Expr operator+(Expr &&a, Expr &&b);
+			friend Expr operator-(Expr &&a, Expr &&b);
+			friend Expr operator*(Expr &&a, Expr &&b);
+			friend Expr operator/(Expr &&a, Expr &&b);
+			friend Expr operator%(Expr &&a, Expr &&b);
+			friend Expr operator^(Expr &&a, Expr &&b);
 			friend class Expr::expr_parser;
 			friend class Expr;
 		public:
@@ -227,6 +246,78 @@ namespace chis {
 		Expr(const expr_node *rootb):Expr(reverse_parse(rootb)) {
 			init_id();
 		}
+		Expr(Expr &&expr) 
+			:id_type(std::move(expr.id_type)),
+			id_value(std::move(expr.id_value)), _sufexpr(std::move(expr._sufexpr)) {
+			node_pool.splice(node_pool.end(), expr.node_pool);
+			root = expr.root;
+			expr.root = nullptr;
+		}
+		Expr(Expr &&a, expr_node &opt, Expr &&b)
+			:id_type(std::move(a.id_type)),
+			id_value(std::move(a.id_value)) {
+			if(prec_map[a.root->type] < prec_map[opt.type]
+				||
+				(prec_map[a.root->type] == prec_map[opt.type]
+				//不满足交换律
+				&& (!exchangadble[a.root->type] && !exchangadble[opt.type])
+				)) {
+				a.node_pool.push_front(expr_node(LP, "("));
+				a.node_pool.push_back(expr_node(RP, ")"));
+			}
+			if(prec_map[b.root->type] < prec_map[opt.type]
+				||
+				(prec_map[b.root->type] == prec_map[opt.type]
+				//不满足交换律
+				&& (!exchangadble[b.root->type] && !exchangadble[opt.type])
+				)) {
+				b.node_pool.push_front(expr_node(LP, "("));
+				b.node_pool.push_back(expr_node(RP, ")"));
+			}
+
+			node_pool.splice(node_pool.end(), a.node_pool);
+			node_pool.push_back(opt);
+			root = &node_pool.back();
+			root->subtree.push_back(a.root);
+			root->subtree.push_back(b.root);
+			node_pool.splice(node_pool.end(), b.node_pool);
+			
+			a.root = b.root = nullptr;
+			for(auto &&i : std::move(b.id_type)) {
+				id_type.insert(i);
+			}
+			for(auto &&i : std::move(b.id_value)) {
+				id_value.insert(i);
+			}
+		}
+		Expr(expr_node &opt, Expr &&a)
+			:id_type(std::move(a.id_type)),
+			id_value(std::move(a.id_value)), _sufexpr(std::move(a._sufexpr)) {
+			node_pool.splice(node_pool.end(), a.node_pool);
+			if(a.root->type != ID && a.root->type != CONST) {
+				node_pool.push_front(expr_node(LP, "("));
+				node_pool.push_back(expr_node(RP, ")"));
+			}
+			node_pool.push_front(opt);
+			root = &node_pool.front();
+			root->subtree.push_back(a.root);
+			a.root = nullptr;
+		}
+		Expr(expr_node &opt, Expr &&a, Expr &&b)
+			:id_type(std::move(a.id_type)),
+			id_value(std::move(a.id_value)), _sufexpr(std::move(a._sufexpr)) {
+			node_pool.splice(node_pool.end(), a.node_pool);
+			node_pool.push_back(expr_node(DOT, ","));
+			node_pool.splice(node_pool.end(), b.node_pool);
+			node_pool.push_front(expr_node(LP, "("));
+			node_pool.push_back(expr_node(RP, ")"));
+
+			node_pool.push_front(opt);
+			root = &node_pool.front();
+			root->subtree.push_back(a.root);
+			root->subtree.push_back(b.root);
+			a.root = b.root = nullptr;
+		}
 		Expr& operator=(const Expr &expr) {
 			operator=(Expr(expr));
 		}
@@ -270,297 +361,7 @@ namespace chis {
 				id_value[v.first] = v.second;
 			}
 		}
-		Expr operator+(const Expr &b) const {
-			// x + 0 = x
-			if(this->root->name == "0") {
-				return b;
-			}
-			else if(b.root->name == "0") {
-				return *this;
-			}
-			//c1 + c2 = c3
-			if(this->root->type == CONST && b.root->type == CONST) {
-				return 
-					to_string(
-					to_double(this->root->name) + to_double(b.root->name));
-			}
-			//-c1 + c2 = c3
-			if(this->root->type == NEGA 
-				&& this->root->subtree[0]->type == CONST && b.root->type == CONST) {
-				return 
-					to_string(
-					to_double(b.root->name) - to_double(this->root->subtree[0]->name));
-			}
-			//c1 + -c2 = c3
-			if(b.root->type == NEGA
-				&& b.root->subtree[0]->type == CONST && this->root->type == CONST) {
-				return
-					to_string(
-					to_double(this->root->name) - to_double(b.root->subtree[0]->name));
-			}
-			//-c1 + -c2 = c3
-			if(this->root->type == NEGA && b.root->type == NEGA
-				&& this->root->subtree[0]->type == CONST 
-				&& b.root->subtree[0]->type == CONST) {
-				return
-					nega(
-					to_string(
-					to_double(this->root->subtree[0]->name) + to_double(b.root->subtree[0]->name)));
-			}
-			if(this->root->type == MUL && b.root->type == MUL) {
-				//n*x + m*x = (m+n) * x
-				if(this->root->subtree[0]->type == CONST
-					&& b.root->subtree[0]->type == CONST
-					&& equal(this->root->subtree[1], b.root->subtree[1])) {
-					return Expr(to_string(
-						to_double(this->root->subtree[0]->name)
-						+ to_double(b.root->subtree[0]->name)))*reverse_parse(b.root->subtree[1]);
-				}
-				//TODO
-			}
-			//n*x + x = (n+1)*x
-			if(this->root->type == MUL) {
-				// *
-				//n x
-				if(this->root->subtree[0]->type == CONST &&
-					equal(this->root->subtree[1], b.root)) {
-					return Expr(to_string(
-						to_double(this->root->subtree[0]->name) + 1))*b;
-				}
-				// *
-				//x n
-				if(this->root->subtree[1]->type == CONST &&
-					equal(this->root->subtree[0], b.root)) {
-					return Expr(to_string(
-						to_double(this->root->subtree[1]->name) + 1))*b;
-				}
-			}
-			//x + n*x = (n+1)*x
-			if(b.root->type == MUL) {
-				// *
-				//n x
-				if(b.root->subtree[0]->type == CONST &&
-					equal(b.root->subtree[1], this->root)) {
-					return Expr(to_string(
-						to_double(b.root->subtree[0]->name) + 1))*(*this);
-				}
-				// *
-				//x n
-				if(b.root->subtree[1]->type == CONST &&
-					equal(b.root->subtree[0], this->root)) {
-					return Expr(to_string(
-						to_double(b.root->subtree[1]->name) + 1))*(*this);
-				}
-			}
-			//x + x = 2x
-			if(equal(this->root, b.root)) {
-				return Expr("2") * b;
-			}
-			//x + -x = 0
-			if(b.root->type == NEGA && equal(this->root, b.root->subtree[0])) {
-				return Expr("0");
-			}
-			if(this->root->type == NEGA && equal(this->root->subtree[0], b.root)) {
-				return Expr("0");
-			}
-			//x-y + y = x
-			if(b.root->type == SUB && equal(this->root, b.root->subtree[1])) {
-				return reverse_parse(b.root->subtree[0]);
-			}
-			if(this->root->type == SUB && equal(b.root, this->root->subtree[1])) {
-				return reverse_parse(this->root->subtree[0]);
-			}
-			return opt(*this, ADD, "+", b);
-		}
-		Expr operator-(const Expr &b) const {
-			// 0 - x = -x
-			// x - 0 = x
-			if(this->root->name == "0") {
-				return nega(b);
-			}
-			else if(b.root->name == "0") {
-				return *this;
-			}
-			//c1 - c2 = c3
-			if(this->root->type == CONST && b.root->type == CONST) {
-				return to_string(
-					to_double(this->root->name) - to_double(b.root->name));
-			}
-			//-c1 - c2 = c3
-			if(this->root->type == NEGA
-				&& this->root->subtree[0]->type == CONST && b.root->type == CONST) {
-				return
-					nega(
-					to_string(
-					to_double(b.root->name) + to_double(this->root->subtree[0]->name)));
-			}
-			//x - x = 0
-			else if(equal(this->root, b.root)) {
-				return Expr("0");
-			}
-			if(this->root->type == MUL && b.root->type == MUL) {
-				//n*x - m*x = (m-n) * x
-				if(this->root->subtree[0]->type == CONST
-					&& b.root->subtree[0]->type == CONST
-					&& equal(this->root->subtree[1], b.root->subtree[1])) {
-					Expr(to_string(
-						to_double(this->root->subtree[0]->name)
-						- to_double(b.root->subtree[0]->name)))*reverse_parse(b.root->subtree[1]);
-				}
-				//TODO
-			}
-			// x - -y = x + y
-			if(b.root->type == NEGA) {
-				return *this + reverse_parse(b.root->subtree[0]);
-			}
-			return opt(*this, SUB, "-", b);
-		}
-		Expr operator*(const Expr &b) const {
-			// x * 1 = x
-			if(this->root->name == "1") {
-				return b;
-			}
-			else if(b.root->name == "1") {
-				return *this;
-			}
-			if(this->root->name == "0" || b.root->name == "0") {
-				return Expr("0");
-			}
-			//c1 * c2 = c3
-			if(this->root->type == CONST && b.root->type == CONST) {
-				return to_string(
-					to_double(this->root->name) * to_double(b.root->name));
-			}
-			//x * x = x^2
-			else if(equal(this->root, b.root)) {
-				return opt(*this, POW, "^", Expr("2"));
-			}
-			// (fx / gx)*gx = fx
-			if(b.root->type == DIV && equal(this->root, b.root->subtree[1])) {
-				return reverse_parse(b.root->subtree[0]);
-			}
-			if(this->root->type == DIV && equal(b.root, this->root->subtree[1])) {
-				return reverse_parse(this->root->subtree[0]);
-			}
-			
-			if(b.root->type == POW && this->root->type == POW) {
-				// gx^a * gx^b = gx^(a+b)
-				if(equal(b.root->subtree[0], this->root->subtree[0])) {
-					return reverse_parse(b.root->subtree[0])
-						^ (reverse_parse(this->root->subtree[1]) + reverse_parse(b.root->subtree[1]));
-				}
-				// gx^a * fx^a = (gx*fx)^a
-				if(equal(b.root->subtree[1], this->root->subtree[1])) {
-					return 
-						(reverse_parse(this->root->subtree[0])) * reverse_parse(b.root->subtree[0])
-						^ reverse_parse(b.root->subtree[1]);
-				}
-
-			}
-			// gx^a * gx = gx^(a+1)
-			if(b.root->type == POW
-				&& equal(b.root->subtree[0], this->root)) {
-				return reverse_parse(b.root->subtree[0])
-					^ (reverse_parse(b.root->subtree[1]) + Expr("1"));
-			}
-			if(this->root->type == POW
-				&& equal(b.root, this->root->subtree[0])) {
-				return reverse_parse(this->root->subtree[0])
-					^ (reverse_parse(this->root->subtree[1]) + Expr("1"));
-			}
-			//-x * -y = x * y
-			if(b.root->type == NEGA && this->root->type == NEGA) {
-				return 
-					reverse_parse(this->root->subtree[0]) 
-					* reverse_parse(b.root->subtree[0]);
-			}
-			// x * -y = -(x*y)
-			if(b.root->type == NEGA) {
-				return
-					nega(*this * reverse_parse(b.root->subtree[0]));
-			}
-			if(this->root->type == NEGA) {
-				return
-					nega(reverse_parse(this->root->subtree[0])* b);
-			}
-			return opt(*this, MUL, "*", b);
-		}
-		Expr operator/(const Expr &b) const {
-			// 0 / x = 0
-			if(this->root->name == "0") {
-				return Expr("0");
-			}
-			// x / 1 = x
-			if(b.root->name == "1") {
-				return *this;
-			}
-			//c1 / c2 = c3
-			if(this->root->type == CONST && b.root->type == CONST) {
-				return 
-					to_string(
-					to_double(this->root->name) / to_double(b.root->name));
-			}
-			//x / x = 1
-			else if(equal(this->root, b.root)) {
-				return Expr("1");
-			}
-			// gx^a / gx^b = gx^(a-b)
-			if(b.root->type == POW && this->root->type == POW
-				&& equal(b.root->subtree[0], this->root->subtree[0])) {
-				return 
-					reverse_parse(b.root->subtree[0])
-					^ (reverse_parse(this->root->subtree[1]) - reverse_parse(b.root->subtree[1]));
-			}
-			// x/y / z = x/(y*z)
-			if(this->root->type == DIV) {
-				return
-					reverse_parse(this->root->subtree[0]) 
-					/ (reverse_parse(this->root->subtree[1]) * b);
-			}
-			// x/y / x = 1/y
-			if(this->root->type == DIV 
-				&& equal(this->root->subtree[0], b.root)) {
-				return
-					Expr("1") / reverse_parse(this->root->subtree[1]);
-			}
-			// x*y / x = y
-			if(this->root->type == MUL) {
-				if(equal(this->root->subtree[0], b.root)) {
-					return reverse_parse(this->root->subtree[1]);
-				}
-				else if(equal(this->root->subtree[1], b.root)) {
-					return reverse_parse(this->root->subtree[0]);
-				}
-			}
-			// -a / -b = a / b
-			if(b.root->type == NEGA && this->root->type == NEGA) {
-				return
-					reverse_parse(this->root->subtree[0])
-					/ reverse_parse(b.root->subtree[0]);
-			}
-			return opt(*this, DIV, "/", b);
-		}
-		Expr operator%(const Expr &b) const {
-			return opt(*this, MOD, "%", b);
-		}
-		Expr operator^(const Expr &b) const {
-			// x ^ 1 = x
-			if(b.root->name == "1") {
-				return *this;
-			}
-			// x ^ 0 = 1
-			if(b.root->name == "0") {
-				return Expr("1");
-			}
-			// (x ^ g) ^ f -> x ^(g*f)
-			if(this->root->type == POW) {
-				return
-					reverse_parse(this->root->subtree[0])
-					^ (reverse_parse(this->root->subtree[1]) * b);
-			}
-
-			return opt(*this, POW, "^", b);
-		}
+		
 		bool operator==(const Expr &b) const {
 			return equal(this->root, b.root);
 		}
@@ -568,73 +369,54 @@ namespace chis {
 			return opt(a, EQU, "=", b);
 		}
 		static Expr opt(const Expr &a, int type, const std::string &name, const Expr &b) {
-			if(a.root->type == ERROR || b.root->type == ERROR) {
-				return Expr("ERROR");
-			}
-			std::list<expr_node> nodes = a.node_pool;
-			if(prec_map[a.root->type] < prec_map[type] 
-				|| 
-				(prec_map[a.root->type] == prec_map[type]
-				//不满足交换律
-				&& (a.root->type == DIV || a.root->type == SUB || a.root->type == POW))) {
-				nodes.push_front(expr_node(LP, "(")); 
-				nodes.push_back(expr_node(RP, ")")); 
-			}
-			nodes.push_back(expr_node(type, name));
-			if(prec_map[b.root->type] < prec_map[type]
-				|| 
-				(prec_map[b.root->type] == prec_map[type] 
-				//不满足交换律
-				&& (type == DIV || type == SUB || type == POW)))
-				nodes.push_back(expr_node(LP, "("));
-			for(auto &i : b.node_pool) {
-				nodes.push_back(i);
-			}
-			if(prec_map[b.root->type] < prec_map[type]
-				|| 
-				(prec_map[b.root->type] == prec_map[type] 
-				//不满足交换律
-				&& (type == DIV || type == SUB || type == POW)))
-				nodes.push_back(expr_node(RP, ")"));
-			return Expr(nodes);
+			return Expr(Expr(a), expr_node(type, name), Expr(b));
 		}
-		static Expr nega(const Expr &b) {
+		static Expr opt(const Expr &a, int type, const std::string &name, Expr &&b) {
+			return Expr(Expr(a), expr_node(type, name), std::move(b));
+		}
+		static Expr opt(Expr &&a, int type, const std::string &name, const Expr &b) {
+			return Expr(std::move(a), expr_node(type, name), Expr(b));
+		}
+		static Expr opt(Expr &&a, int type, const std::string &name, Expr &&b) {
+			return Expr(std::move(a), expr_node(type, name), std::move(b));
+		}
+		static Expr nega(Expr &&b) {
 			if(b.root->type == NEGA) {
 				return reverse_parse(b.root->subtree[0]);
 			}
 			if(b.root->name == "0") {
 				return b;
 			}
-			return call_func(b, SUB, "-");
+			return call_func(b, NEGA, "-");
 		}
-		static Expr posi(const Expr &b) {
-			return call_func(b, ADD, "+");
+		static Expr posi(Expr &&b) {
+			return call_func(b, POSI, "+");
 		}
-		static Expr sin(const Expr &b) {
+		static Expr sin(Expr &&b) {
 			return call_func(b, SIN, "sin");
 		}
-		static Expr cos(const Expr &b) {
+		static Expr cos(Expr &&b) {
 			return call_func(b, COS, "cos");
 		}
-		static Expr tan(const Expr &b) {
+		static Expr tan(Expr &&b) {
 			return call_func(b, TAN, "tan");
 		}
-		static Expr cot(const Expr &b) {
+		static Expr cot(Expr &&b) {
 			return call_func(b, COT, "cot");
 		}
-		static Expr arcsin(const Expr &b) {
+		static Expr arcsin(Expr &&b) {
 			return call_func(b, ARCSIN, "arcsin");
 		}
-		static Expr arccos(const Expr &b) {
+		static Expr arccos(Expr &&b) {
 			return call_func(b, ARCCOS, "arccos");
 		}
-		static Expr arctan(const Expr &b) {
+		static Expr arctan(Expr &&b) {
 			return call_func(b, ARCTAN, "arctan");
 		}
-		static Expr arccot(const Expr &b) {
+		static Expr arccot(Expr &&b) {
 			return call_func(b, ARCCOT, "arccot");
 		}
-		static Expr ln(const Expr &b) {
+		static Expr ln(Expr &&b) {
 			if(b.root->name == "e") {
 				return Expr("1");
 			}
@@ -643,7 +425,7 @@ namespace chis {
 			}
 			return call_func(b, LN, "ln");
 		}
-		static Expr log(const Expr &a, const Expr &b) {
+		static Expr log(Expr &&a, Expr &&b) {
 			if(equal(a.root, b.root)) {
 				return Expr("1");
 			}
@@ -657,7 +439,7 @@ namespace chis {
 				}
 				//log(gx^a, fx) = log(gx,fx)/a
 				else {
-					return  log(reverse_parse(a.root->subtree[0]), b) / reverse_parse(a.root->subtree[1]);
+					return  log(reverse_parse(a.root->subtree[0]), std::move(b)) / reverse_parse(a.root->subtree[1]);
 				}
 			}
 			if(b.root->type == POW) {
@@ -669,20 +451,20 @@ namespace chis {
 				}
 				//log(gx, fx^b) = (b)*log(gx,fx)
 				else {
-					return reverse_parse(b.root->subtree[1]) * log(a, reverse_parse(b.root->subtree[0]));
+					return reverse_parse(b.root->subtree[1]) * log(std::move(a), reverse_parse(b.root->subtree[0]));
 				}
 			}
 			
 			return call_func(a, b, LOG, "log");
 		}
-		static Expr max(const Expr &a, const Expr &b) {
+		static Expr max(Expr &&a, Expr &&b) {
 			if(a.root->type == CONST && b.root->type == CONST) {
 				double da = to_double(a.root->name), db = to_double(b.root->name);
 				return to_string(da > db ? da : db);
 			}
 			return call_func(a, b, MAX, "max");
 		}
-		static Expr min(const Expr &a, const Expr &b) {
+		static Expr min(Expr &&a, Expr &&b) {
 			if(a.root->type == CONST && b.root->type == CONST) {
 				double da = to_double(a.root->name), db = to_double(b.root->name);
 				return to_string(da < db ? da : db);
@@ -690,32 +472,25 @@ namespace chis {
 			return call_func(a, b, MIN, "min");
 		}
 		static Expr call_func(const Expr &a, int type, const std::string &name) {
-			if(a.root->type == ERROR) {
-				return Expr("ERROR");
-			}
-			std::list<expr_node> nodes;
-			nodes.push_back(expr_node(type, name));
-			if(a.root->type != ID && a.root->type != CONST) nodes.push_back(expr_node(LP, "("));
-			for(auto &i : a.node_pool) {
-				nodes.push_back(i);
-			}
-			if(a.root->type != ID && a.root->type != CONST) nodes.push_back(expr_node(RP, ")"));
-			return Expr(nodes);
+			return Expr(expr_node(type, name), Expr(a));
 		}
+		static Expr call_func(Expr &&a, int type, const std::string &name) {
+			return Expr(expr_node(type, name), std::move(a));
+		}
+
 		static Expr call_func(const Expr &a, const Expr &b, int type, const std::string &name) {
-			if(a.root->type == ERROR || b.root->type == ERROR) {
-				return Expr("ERROR");
-			}
-			std::list<expr_node> nodes = a.node_pool;
-			nodes.push_front(expr_node(LP, "("));
-			nodes.push_front(expr_node(type, name));
-			nodes.push_back(expr_node(DOT, ","));
-			for(auto &i : b.node_pool) {
-				nodes.push_back(i);
-			}
-			nodes.push_back(expr_node(RP, ")"));
-			return Expr(nodes);
+			return Expr(expr_node(type, name),Expr(a), Expr(b));
 		}
+		static Expr call_func(Expr &&a, const Expr &b, int type, const std::string &name) {
+			return Expr(expr_node(type, name), std::move(a), Expr(b));
+		}
+		static Expr call_func(const Expr &a, Expr &&b, int type, const std::string &name) {
+			return Expr(expr_node(type, name), Expr(a), std::move(b));
+		}
+		static Expr call_func(Expr &&a, Expr &&b, int type, const std::string &name) {
+			return Expr(expr_node(type, name), std::move(a), std::move(b));
+		}
+
 		static Expr make_diff(const Expr &fx, const Expr &gx, const std::string &x) {
 			return make_diff(fx, x) / make_diff(gx, x);
 		}
@@ -756,10 +531,15 @@ namespace chis {
 			}
 			return equal(a, b);
 		}
-		static Expr to_expr(std::list<std::list<Expr>> &exprs) {
+		static Expr to_expr(std::list<std::list<Expr*>> &exprs) {
 			std::list<Expr> addexp;
 			for(auto &i : exprs) {
-				i.sort();
+				i.sort([](Expr *a, Expr *b) {
+					if(a == b) {
+						return false;
+					}
+					return *a < *b;
+				});
 				std::list<Expr> unequ;
 				auto bg = i.begin();
 				int n = 0;
@@ -767,14 +547,24 @@ namespace chis {
 					auto next = itor;
 					++next;
 					++n;
-					if(next == i.end() || !same_plynomials(*itor, *next)) {
-						unequ.push_back(*itor ^ Expr(to_string(n)));
+					if(next == i.end() || (*itor != *next && !same_plynomials(**itor, **next))) {
+						unequ.push_back(Expr(**itor) ^ Expr(to_string(n)));
 						n = 0;
 					}
 				}
 				addexp.push_back(Expr("1"));
 				for(auto &j : unequ) {
-					addexp.back() = addexp.back() * j;
+					addexp.back() = std::move(addexp.back()) * std::move(j);
+				}
+			}
+			//delete
+			std::set<Expr*> deleted;
+			for(auto &i:exprs) {
+				for(auto &j : i) {
+					if(deleted.find(j) == deleted.end()) {
+						delete j;
+						deleted.insert(j);
+					}
 				}
 			}
 			addexp.sort();
@@ -786,18 +576,120 @@ namespace chis {
 				++next;
 				++n;
 				if(next == addexp.end() || !same_plynomials(*itor, *next)) {
-					unequ.push_back(Expr(to_string(n))* *itor);
+					unequ.push_back(Expr(to_string(n))* std::move(*itor));
 					n = 0;
 				}
 			}
 			Expr ret("0");
 			for(auto &i:unequ) {
-				ret = ret + i;
+				ret = std::move(ret)+std::move(i);
 			}
 			return ret;
 		}
-		bool operator<(const Expr &b) const {
-			return less_than(root, b.root);
+		bool operator<(Expr &b) {
+			if(root->type == CONST && b.root->type != CONST) {
+				return true;
+			}
+			if(root->type != CONST && b.root->type == CONST) {
+				return false;
+			}
+			if(root->type == CONST && b.root->type == CONST) {
+				if(root->name.size() < b.root->name.size()) {
+					return true;
+				}
+				else if(root->name.size() == b.root->name.size()) {
+					return root->name < b.root->name;
+				}
+				return false;
+			}
+			if(_sufexpr.empty()) {
+				_sufexpr = sufexpr(root);
+			}
+			if(b._sufexpr.empty()) {
+				b._sufexpr = sufexpr(b.root);
+			}
+			return _sufexpr < b._sufexpr;
+		}
+		bool operator<(const Expr &b) const{
+			if(root->type == CONST && b.root->type != CONST) {
+				return true;
+			}
+			if(root->type != CONST && b.root->type == CONST) {
+				return false;
+			}
+			if(root->type == CONST && b.root->type == CONST) {
+				if(root->name.size() < b.root->name.size()) {
+					return true;
+				}
+				else if(root->name.size() == b.root->name.size()) {
+					return root->name < b.root->name;
+				}
+				return false;
+			}
+			if(_sufexpr.empty()) {
+				if(b._sufexpr.empty()) {
+					return sufexpr(root) < sufexpr(b.root);
+				}
+				return sufexpr(root) < b._sufexpr;
+			}
+			else {
+				if(b._sufexpr.empty()) {
+					return _sufexpr < sufexpr(b.root);
+				}
+				return _sufexpr < b._sufexpr;
+			}
+		}
+		bool operator<(const Expr &b) {
+			if(root->type == CONST && b.root->type != CONST) {
+				return true;
+			}
+			if(root->type != CONST && b.root->type == CONST) {
+				return false;
+			}
+			if(root->type == CONST && b.root->type == CONST) {
+				if(root->name.size() < b.root->name.size()) {
+					return true;
+				}
+				else if(root->name.size() == b.root->name.size()) {
+					return root->name < b.root->name;
+				}
+				return false;
+			}
+			if(_sufexpr.empty()) {
+				_sufexpr = sufexpr(root);
+			}
+			if(b._sufexpr.empty()) {
+				return _sufexpr < sufexpr(b.root);
+			}
+			else {
+				return _sufexpr < b._sufexpr;
+			}
+		}
+		bool operator<(Expr &b) const {
+			if(root->type == CONST && b.root->type != CONST) {
+				return true;
+			}
+			if(root->type != CONST && b.root->type == CONST) {
+				return false;
+			}
+			if(root->type == CONST && b.root->type == CONST) {
+				if(root->name.size() < b.root->name.size()) {
+					return true;
+				}
+				else if(root->name.size() == b.root->name.size()) {
+					return root->name < b.root->name;
+				}
+				return false;
+			}
+			if(b._sufexpr.empty()) {
+				b._sufexpr = sufexpr(b.root);
+			}
+			if(_sufexpr.empty()) {
+				return sufexpr(root) < b._sufexpr;
+			}
+			else {
+				return _sufexpr < b._sufexpr;
+			}
 		}
 		void swap(Expr &b) {
 			std::swap(root, b.root);
@@ -872,45 +764,64 @@ namespace chis {
 		}
 	private:
 		static Expr reverse_parse(const expr_node *subroot);
-		static bool less_than(const expr_node *a, const expr_node *b) {
-			if(a->type == CONST && b->type != CONST) {
-				return true;
-			}
-			if(a->type != CONST && b->type == CONST) {
-				return false;
-			}
-			if(a->type == CONST && b->type == CONST) {
-				if(a->name.size() < b->name.size()) {
-					return true;
-				}
-				else if(a->name.size() == b->name.size()) {
-					return a->name < b->name;
-				}
-				return false;
-			}
-			return sufexpr(a) < sufexpr(b);
-		}
 		static bool equal(const expr_node *a, const expr_node *b) {
 			return sufexpr(a)==sufexpr(b);
 		}
 		static std::string sufexpr(const expr_node *r) {
 			std::string expr = r->name;
 			if(!(r->subtree.empty())) {
-				std::vector<std::string> subexpr;
 				for(auto &i:r->subtree) {
-					subexpr.push_back(sufexpr(i));
-				}
-				std::sort(subexpr.begin(), subexpr.end());
-				for(auto &i : subexpr) {
-					expr += i;
+					expr += sufexpr(i);
 				}
 			}
-			return std::move(expr);
+			return std::move(expr)+"|";
 		}
 		static bool equal(const Expr &a, const Expr &b) {
-			return equal(a.root, b.root);
+			if(a._sufexpr.empty()) {
+				if(b._sufexpr.empty()) {
+					return sufexpr(a.root) == sufexpr(b.root);
+				}
+				return sufexpr(a.root) == b._sufexpr;
+			}
+			else {
+				if(b._sufexpr.empty()) {
+					return a._sufexpr == sufexpr(b.root);
+				}
+				return a._sufexpr == b._sufexpr;
+			}
 		}
-		static std::list<std::list<Expr>> stdexpr(const expr_node *subroot);
+		static bool equal(Expr &a, Expr &b) {
+			if(a._sufexpr.empty()) {
+				a._sufexpr = sufexpr(a.root);
+			}
+			if(b._sufexpr.empty()) {
+				b._sufexpr = sufexpr(b.root);
+			}
+			return a._sufexpr == b._sufexpr;
+		}
+		static bool equal(const Expr &a, Expr &b) {
+			if(b._sufexpr.empty()) {
+				b._sufexpr = sufexpr(b.root);
+			}
+			if(a._sufexpr.empty()) {
+				return sufexpr(a.root) == b._sufexpr;
+			}
+			else {
+				return a._sufexpr == b._sufexpr;
+			}
+		}
+		static bool equal(Expr &a, const Expr &b) {
+			if(a._sufexpr.empty()) {
+				a._sufexpr = sufexpr(a.root);
+			}
+			if(b._sufexpr.empty()) {
+				return sufexpr(b.root) == a._sufexpr;
+			}
+			else {
+				return b._sufexpr == a._sufexpr;
+			}
+		}
+		static std::list<std::list<Expr*>> stdexpr(const expr_node *subroot);
 		static Expr diff(const expr_node *subroot, const std::string &x);
 		static std::string error_message;
 		static expr_node ERROR_NODE;
@@ -919,6 +830,7 @@ namespace chis {
 		std::map<std::string, int> id_type;
 		std::map<std::string, double> id_value;
 		std::list<expr_node> node_pool;
+		std::string _sufexpr;
 	};
 	
 }
