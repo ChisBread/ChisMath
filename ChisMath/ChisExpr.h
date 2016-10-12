@@ -29,6 +29,7 @@ namespace chis {
 		DIFF,//微分
 		MIN, MAX,
 	};
+
 	extern int max_typeid;
 	extern std::map<std::string, int> keyword;
 	extern std::map<int, int> prec_map;
@@ -42,7 +43,6 @@ namespace chis {
 	Expr operator/(Expr &&a, Expr &&b);
 	Expr operator%(Expr &&a, Expr &&b);
 	Expr operator^(Expr &&a, Expr &&b);
-	//TODO const &
 	class Expr {
 		friend Expr operator+(Expr &&a, Expr &&b);
 		friend Expr operator-(Expr &&a, Expr &&b);
@@ -200,6 +200,43 @@ namespace chis {
 			_lexer &lexer;
 		};
 	public:
+		struct Expr_ptr_cmp {
+			bool operator()(const Expr *a, const Expr *b) const {
+				return *a < *b;
+			}
+		};
+		struct Expr_map_cmp {
+			bool operator()(const std::map<Expr*, int, Expr_ptr_cmp> &a, const std::map<Expr*, int, Expr_ptr_cmp> &b) const {
+				if(a.size() < b.size()) {
+					return true;
+				}
+				if(a.size() > b.size()) {
+					return false;
+				}
+				auto ia = a.begin(), ib = b.begin();
+				for(; ia != a.end() && ib != b.end(); ++ia, ++ib) {
+					if(*(ia->first) < *(ib->first)) {
+						return true;
+					}
+					else if(*(ib->first) < *(ia->first)) {
+						return false;
+					}
+					//first 相等
+					else if(ia->second < ib->second) {
+						return true;
+					}
+					else if(ib->second < ia->second) {
+						return false;
+					}
+				}
+				//abc < abcd
+				
+				return false;
+			}
+		};
+		using plyn_map = std::map<Expr*, int, Expr_ptr_cmp>;
+		using stdexpr_map = std::map<plyn_map, int, Expr_map_cmp>;
+	public:
 		Expr(const std::string &expr) {
 			expr_lexer lexer(node_pool, expr);
 			expr_parser parser(lexer);
@@ -321,6 +358,7 @@ namespace chis {
 		}
 		Expr& operator=(const Expr &expr) {
 			operator=(Expr(expr));
+			return *this;
 		}
 		Expr& operator=(Expr &&expr) {
 			swap(expr);
@@ -334,6 +372,9 @@ namespace chis {
 				}
 				//TODO CONST
 			}
+		}
+		void init_sufexpr() {
+			_sufexpr = sufexpr(root);
 		}
 		bool is_constexpr() const{
 			//没有未知数
@@ -532,19 +573,11 @@ namespace chis {
 			}
 			return equal(a, b);
 		}
-		static Expr to_expr(
-			std::list<std::vector<std::pair<Expr*, int>>> &exprs) {
+		static Expr to_expr(stdexpr_map &exprs) {
 			std::list<Expr> addexp;
 			for(auto &i : exprs) {
-				sort(i.begin(), i.end(), [](std::pair<Expr*, int> &a, std::pair<Expr*, int> &b) {
-					if(a.first == b.first) {
-						return false;
-					}
-					return *a.first < *b.first;
-				});
 				std::list<Expr> unequ;
-				
-				for(auto &j:i) {
+				for(auto &j:i.first) {
 					//a1^n1*a2^n2....
 					if(j.first->root->type == CONST) {
 						unequ.push_back(Expr(to_string(
@@ -558,32 +591,10 @@ namespace chis {
 				for(auto &j : unequ) {
 					addexp.back() = std::move(addexp.back()) * std::move(j);
 				}
-			}
-			//delete
-			std::set<Expr*> deleted;
-			for(auto &i:exprs) {
-				for(auto &j : i) {
-					if(deleted.find(j.first) == deleted.end()) {
-						delete j.first;
-						deleted.insert(j.first);
-					}
-				}
-			}
-			addexp.sort();
-			std::list<Expr> unequ;
-			auto bg = addexp.begin();
-			int n = 0;
-			for(auto itor = addexp.begin(); itor != addexp.end(); ++itor) {
-				auto next = itor;
-				++next;
-				++n;
-				if(next == addexp.end() || !same_plynomials(*itor, *next)) {
-					unequ.push_back(std::move(*itor) * Expr(to_string(n)));
-					n = 0;
-				}
+				addexp.back() = Expr(to_string(i.second) * std::move(addexp.back()));
 			}
 			Expr ret("0");
-			for(auto &i:unequ) {
+			for(auto &i:addexp) {
 				ret = std::move(ret)+std::move(i);
 			}
 			return ret;
@@ -710,8 +721,13 @@ namespace chis {
 			error_message.clear();
 		}
 		Expr stdexpr() const{
-			auto &&expr = stdexpr(root);
-			return to_expr(expr);
+			std::set<Expr*, Expr_ptr_cmp> ptr_map;
+			auto &&expr_list = stdexpr(root, ptr_map);
+			auto &&expr = to_expr(expr_list);
+			for(auto i : ptr_map) {
+				delete i;
+			}
+			return std::move(expr);
 		}
 		void print() {
 			print(root);
@@ -823,7 +839,7 @@ namespace chis {
 				return b._sufexpr == a._sufexpr;
 			}
 		}
-		static std::list<std::vector<std::pair<Expr*, int>>> stdexpr(const expr_node *subroot);
+		static stdexpr_map stdexpr(const expr_node *subroot, std::set<Expr*, Expr_ptr_cmp> &ptr_map);
 		static Expr diff(const expr_node *subroot, const std::string &x);
 		static std::string error_message;
 		static expr_node ERROR_NODE;
@@ -834,5 +850,12 @@ namespace chis {
 		std::list<expr_node> node_pool;
 		std::string _sufexpr;
 	};
-	
+	using plyn_map = Expr::plyn_map;
+	using stdexpr_map = Expr::stdexpr_map;
+	plyn_map& operator*=(plyn_map &a, const plyn_map &b);
+	stdexpr_map& operator+=(stdexpr_map &a, const std::pair<plyn_map, int> &b);
+	stdexpr_map& operator*=(stdexpr_map &a, const std::pair<plyn_map, int> &b);
+	stdexpr_map& operator+=(stdexpr_map &a, const stdexpr_map &b);
+	stdexpr_map& operator*=(stdexpr_map &a, const stdexpr_map &b);
+
 }

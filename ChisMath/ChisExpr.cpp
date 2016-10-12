@@ -46,6 +46,7 @@ namespace chis {
 	}
 	std::string to_string(double num) {
 		std::strstream strs;
+		strs.setf(std::ios::fixed);
 		strs << num;
 		std::string ret;
 		strs >> ret;
@@ -100,8 +101,14 @@ namespace chis {
 					--ndot;
 				}
 				++scan_index;
+				bool showpoint = false;
+				bool point_is_useful = false;
 				for(; ndot && scan_index != end; ++scan_index) {
+					if(showpoint && (*scan_index > '0' && *scan_index <= '9')) {
+						point_is_useful = true;
+					}
 					if(*scan_index == '.') {
+						showpoint = true;
 						--ndot;
 					}
 					//不是合法的NUM字符
@@ -116,6 +123,9 @@ namespace chis {
 					token_buffer.push(ERROR_NODE);
 				}
 				else {
+					if(showpoint && !point_is_useful) {
+						name = name.substr(0, name.find('.'));
+					}
 					token_buffer.push(expr_node(CONST, name));
 				}
 			}
@@ -663,121 +673,118 @@ namespace chis {
 		}
 		return Expr("ERROR");
 	}
-	std::list<std::vector<std::pair<Expr*,int>>> Expr::stdexpr(const expr_node *st) {
-		if(!st) {
-			return{ { { new Expr("ERROR"), 1 } } };
-		}
-		auto count_to = 
-			[](std::vector<std::pair<Expr*, int>> &a
-			, const std::vector<std::pair<Expr*, int>> &b) {
-			for(auto &i : b) {
-				auto j = a.begin();
-				for(; j != a.end(); ++j) {
-					if(j->first == i.first) {
-						j->second += i.second;
-						break;
-					}
-				}
-				if(j == a.end()) {
-					a.push_back(i);
-				}
+	stdexpr_map Expr::stdexpr(const expr_node *st, std::set<Expr*, Expr_ptr_cmp> &ptr_map) {
+		auto check_map = [&](Expr *&ptr) {
+			auto in_map = ptr_map.find(ptr);
+			if(in_map != ptr_map.end()) {
+				delete ptr;
+				ptr = *in_map;
+			}
+			else {
+				ptr_map.insert(ptr);
+				ptr->init_sufexpr();
 			}
 		};
+		if(!st) {
+			auto ptr = new Expr("ERROR");
+			check_map(ptr);
+			return{ { { { ptr, 1 } }, 1 } };
+		}
+		
 		switch(st->type) {
-		case ERROR:
-			return{ { { new Expr("ERROR"), 1 } } };
+		case ERROR:{
+			auto ptr = new Expr("ERROR");
+			check_map(ptr);
+			return{ { { { ptr, 1 } }, 1 } };
+		}
 		case ID:
 		case CONST:
-			return{ { { new  Expr(st->name), 1 } } };
+		{
+			auto ptr = new  Expr(st->name);
+			check_map(ptr);
+			return{ { { { ptr, 1 } }, 1 } };
+		}
 		case ADD:
 		{
-			auto &&subexpr = stdexpr(st->subtree[0]);
-			subexpr.splice(subexpr.begin(), stdexpr(st->subtree[1]));
+			auto &&subexpr = stdexpr(st->subtree[0], ptr_map);
+			subexpr += stdexpr(st->subtree[1], ptr_map);
 			return std::move(subexpr);
 		}
 		case SUB:
 		{
-			auto &&expra = stdexpr(st->subtree[0]);
-			auto &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0], ptr_map);
+			auto &&exprb = stdexpr(st->subtree[1], ptr_map);
 			Expr *nega1 = new Expr("-1");
-			for(auto &i:exprb) {
-				i.push_back({ nega1 , 1});
-			}
-			expra.splice(expra.begin(), exprb);
+			check_map(nega1);
+			plyn_map n1 = { { nega1, 1 } };
+			exprb *= std::pair<plyn_map, int>{ n1, 1 };
+			expra += exprb;
 			return std::move(expra);
 		}
 		case MUL:
 		{
-			auto &&expra = stdexpr(st->subtree[0]);
-			auto &&exprb = stdexpr(st->subtree[1]);
-			std::list<std::vector<std::pair<Expr*, int>>> ret;
-			for(const auto &i: exprb) {
-				for(auto j : expra) {
-					count_to(j, i);
-					ret.push_back(std::move(j));
-				}
-			}
-			return std::move(ret);
+			auto &&expra = stdexpr(st->subtree[0], ptr_map);
+			auto &&exprb = stdexpr(st->subtree[1], ptr_map);
+			expra *= exprb;
+			return std::move(expra);
 		}
 		case DIV:
 		{
-			auto &&expra = stdexpr(st->subtree[0]);
-			auto &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0], ptr_map);
+			auto &&exprb = stdexpr(st->subtree[1], ptr_map);
 			Expr *b = new Expr(to_expr(exprb) ^ Expr("-1"));
-			for(auto &i : expra) {
-				i.push_back({ b, 1});
-			}
+			check_map(b);
+			plyn_map b1 = { { b, 1 } };
+			expra *= std::pair<plyn_map, int>{b1, 1};
 			return std::move(expra);
 		} 
 		case MOD:
 		{
-			auto &&expra = stdexpr(st->subtree[0]);
-			auto &&exprb = stdexpr(st->subtree[1]);
-			return{ { { new Expr(to_expr(expra) % to_expr(exprb)), 1 } } };
+			auto &&expra = stdexpr(st->subtree[0], ptr_map);
+			auto &&exprb = stdexpr(st->subtree[1], ptr_map);
+			auto ptr = new Expr(to_expr(expra) % to_expr(exprb));
+			check_map(ptr);
+			return{ { { { ptr, 1 } }, 1 } };
 		}
 		case POW:
 		{
-			auto &&expra = stdexpr(st->subtree[0]);
-			auto &&exprb = stdexpr(st->subtree[1]);
-			std::list<std::vector<std::pair<Expr*, int>>> ret;
+			auto &&expra = stdexpr(st->subtree[0], ptr_map);
+			auto &&exprb = stdexpr(st->subtree[1], ptr_map);
+			stdexpr_map ret;
 			if(
 				//(x1+x2...+xn)^m
 				expra.size() > 1
 				//exprb为整数
-				&& exprb.size() == 1 && exprb.front().size() == 1
-				&& exprb.front().front().first->root->type == CONST
-				&& exprb.front().front().first->root->name.find('.') == std::string::npos
-				&& exprb.front().front().first->root->name.find('-') == std::string::npos) {
-				int n = to_double(exprb.front().front().first->root->name);
+				&& exprb.size() == 1 && exprb.begin()->first.size() == 1
+				&& exprb.begin()->first.begin()->first->root->type == CONST
+				&& exprb.begin()->first.begin()->first->root->name.find('.') == std::string::npos
+				&& exprb.begin()->first.begin()->first->root->name.find('-') == std::string::npos) {
+				int n = to_double(exprb.begin()->first.begin()->first->root->name);
 				ret = expra;
 				//去括号
 				for(int k = 1; k < n; ++k) {
-					std::list<std::vector<std::pair<Expr*, int>>> temp;
-					for(const auto &i : expra) { 
-						for(auto j : ret) {
-							count_to(j, i);
-							temp.push_back(std::move(j));
-						}
-					}
-					ret.swap(temp);
+					ret *= expra;
 				}
 			}
 			else {
-				ret.push_back({ { new Expr(to_expr(expra) ^ to_expr(exprb)), 1 } });
+				auto ptr = new Expr(to_expr(expra) ^ to_expr(exprb));
+				check_map(ptr);
+				plyn_map temp = { { ptr, 1 } };
+				ret += {temp, 1};
 			}
 			return std::move(ret);
 		}
 		case NEGA:
 		{
-			auto &&expr = stdexpr(st->subtree[0]);
+			auto &&expr = stdexpr(st->subtree[0], ptr_map);
 			Expr *nega1 = new Expr("-1");
-			for(auto &i : expr) {
-				i.push_back({ nega1 , 1});
-			}
+			check_map(nega1);
+			plyn_map n1 = { { nega1, 1 } };
+			expr *= std::pair<plyn_map, int>{n1, 1};
 			return expr;
 		}
 		case POSI:
-			return 	stdexpr(st->subtree[0]);
+			return 	stdexpr(st->subtree[0], ptr_map);
 		case SIN:
 		case COS:
 		case TAN:
@@ -788,30 +795,69 @@ namespace chis {
 		case ARCCOT:
 		case LN:
 		{
-			auto &&expr = stdexpr(st->subtree[0]);
+			auto &&expr = stdexpr(st->subtree[0], ptr_map);
 			Expr a(to_expr(expr));
-
-			return{ { { new Expr(call_func(a, st->type, st->name)), 1 } } };
+			auto ptr = new Expr(call_func(a, st->type, st->name));
+			check_map(ptr);
+			return{ { {{ ptr, 1 } }, 1 } };
 		}
 		case LOG:
 		case MAX:
 		case MIN:
 		case DIFF:
 		{
-			auto &&expra = stdexpr(st->subtree[0]);
-			auto &&exprb = stdexpr(st->subtree[1]);
+			auto &&expra = stdexpr(st->subtree[0], ptr_map);
+			auto &&exprb = stdexpr(st->subtree[1], ptr_map);
 
 			Expr a(to_expr(expra));
 			Expr b(to_expr(exprb));
-
-			return{ { { new Expr(call_func(a, b, st->type, st->name)), 1 } } };
+			auto ptr = new Expr(call_func(a, b, st->type, st->name));
+			check_map(ptr);
+			return{ { { { ptr, 1 } }, 1 } };
 		}
 		default:
 			error_message
 				+= st->name + "is unkown symbol.\n";
 			break;
 		}
-		return{ { { new Expr("ERROR"), 1 } } };
+		auto ptr = new Expr("ERROR");
+		check_map(ptr);
+		return{ { { { ptr, 1 } }, 1 } };
+	}
+
+	plyn_map& operator*=(plyn_map &a, const plyn_map &b) {
+		for(auto i : b) {
+			a[i.first] += i.second;
+		}
+		return a;
+	}
+	stdexpr_map& operator+=(stdexpr_map &a, const std::pair<plyn_map, int> &b) {
+		a[b.first] += b.second;
+		return a;
+	}
+	stdexpr_map& operator*=(stdexpr_map &a, const std::pair<plyn_map, int> &b) {
+		stdexpr_map temp;
+		for(auto i : a) {
+			temp[static_cast<plyn_map>(i.first) *= b.first] += i.second * b.second;
+		}
+		std::swap(a, temp);
+		return a;
+	}
+	stdexpr_map& operator+=(stdexpr_map &a, const stdexpr_map &b) {
+		for(auto &i : b) {
+			a[i.first] += i.second;
+		}
+		return a;
+	}
+	stdexpr_map& operator*=(stdexpr_map &a, const stdexpr_map &b) {
+		stdexpr_map temp;
+		for(auto &i : b) {
+			for(auto j : a) {
+				temp[static_cast<plyn_map>(j.first) *= i.first] += i.second * j.second;
+			}
+		}
+		std::swap(a, temp);
+		return a;
 	}
 
 	Expr operator+(Expr &&a, Expr &&b) {
@@ -985,6 +1031,13 @@ namespace chis {
 			a.root->subtree[0]->name 
 				= to_string(to_double(a.root->subtree[0]->name)*to_double(b.root->name));
 			return std::move(a);
+		}
+		//m * n*x = m*n*x
+		if(b.root->type == MUL && b.root->subtree[0]->type == CONST
+			&& a.root->type == CONST) {
+			b.root->subtree[0]->name
+				= to_string(to_double(b.root->subtree[0]->name)*to_double(a.root->name));
+			return std::move(b);
 		}
 		// (fx / gx)*gx = fx
 		if(b.root->type == DIV && Expr::equal(a.root, b.root->subtree[1])) {
