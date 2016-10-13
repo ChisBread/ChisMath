@@ -3,7 +3,6 @@
 using namespace chis;
 int main() {
 	while(1) {
-		//bug case 1+4*x+6*x^2+4*x^3+x^4
 		std::string exp("x^(x^(x^(x^(x^(x^x)))))"), dep_var("x");
 		std::cin >> exp >> dep_var;
 		Expr expr(exp);
@@ -20,6 +19,7 @@ int main() {
 			std::cout << "D:" << expr.reverse_parse().stdexpr().string_expr() << std::endl;
 		}
 	}
+	//x^(1+y+1+y)
 	//(1+x)*x*(x+1)
 	return 0;
 }

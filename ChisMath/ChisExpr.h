@@ -34,6 +34,7 @@ namespace chis {
 	extern std::map<std::string, int> keyword;
 	extern std::map<int, int> prec_map;
 	extern std::map<int, bool> exchangadble;
+	extern std::map<int, int> operand;
 	double to_double(const std::string &num);
 	std::string to_string(double num);
 	class Expr;
@@ -207,12 +208,6 @@ namespace chis {
 		};
 		struct Expr_map_cmp {
 			bool operator()(const std::map<Expr*, int, Expr_ptr_cmp> &a, const std::map<Expr*, int, Expr_ptr_cmp> &b) const {
-				if(a.size() < b.size()) {
-					return true;
-				}
-				if(a.size() > b.size()) {
-					return false;
-				}
 				auto ia = a.begin(), ib = b.begin();
 				for(; ia != a.end() && ib != b.end(); ++ia, ++ib) {
 					if(*(ia->first) < *(ib->first)) {
@@ -230,8 +225,7 @@ namespace chis {
 					}
 				}
 				//abc < abcd
-				
-				return false;
+				return a.size() < b.size();
 			}
 		};
 		using plyn_map = std::map<Expr*, int, Expr_ptr_cmp>;
@@ -330,7 +324,7 @@ namespace chis {
 		}
 		Expr(expr_node &opt, Expr &&a)
 			:id_type(std::move(a.id_type)),
-			id_value(std::move(a.id_value)), _sufexpr(std::move(a._sufexpr)) {
+			id_value(std::move(a.id_value)) {
 			node_pool.splice(node_pool.end(), a.node_pool);
 			if(a.root->type != ID && a.root->type != CONST) {
 				node_pool.push_front(expr_node(LP, "("));
@@ -343,7 +337,7 @@ namespace chis {
 		}
 		Expr(expr_node &opt, Expr &&a, Expr &&b)
 			:id_type(std::move(a.id_type)),
-			id_value(std::move(a.id_value)), _sufexpr(std::move(a._sufexpr)) {
+			id_value(std::move(a.id_value)) {
 			node_pool.splice(node_pool.end(), a.node_pool);
 			node_pool.push_back(expr_node(DOT, ","));
 			node_pool.splice(node_pool.end(), b.node_pool);
@@ -537,8 +531,7 @@ namespace chis {
 			return make_diff(fx, x) / make_diff(gx, x);
 		}
 		static Expr make_diff(const Expr &y, const std::string &x) {
-			Expr &&expr = diff(reverse_parse(y.root).root, x);
-			return expr;
+			return diff(y.root, x);
 		}
 		static bool same_plynomials(const Expr &a, const Expr &b) {
 			//同属一个整式
@@ -592,6 +585,7 @@ namespace chis {
 					addexp.back() = std::move(addexp.back()) * std::move(j);
 				}
 				addexp.back() = Expr(to_string(i.second) * std::move(addexp.back()));
+				addexp.back()._sufexpr.clear();
 			}
 			Expr ret("0");
 			for(auto &i:addexp) {
@@ -600,18 +594,24 @@ namespace chis {
 			return ret;
 		}
 		bool operator<(Expr &b) {
-			if(root->type == CONST && b.root->type != CONST) {
+			bool this_is_const = (root->type == CONST
+				|| (operand[root->type] == 1 && root->subtree[0]->type == CONST));
+			bool b_is_const = (b.root->type == CONST
+				|| (operand[b.root->type] == 1 && b.root->subtree[0]->type == CONST));
+			if(this_is_const && !b_is_const) {
 				return true;
 			}
-			if(root->type != CONST && b.root->type == CONST) {
+			if(!this_is_const && b_is_const) {
 				return false;
 			}
-			if(root->type == CONST && b.root->type == CONST) {
-				if(root->name.size() < b.root->name.size()) {
+			if(this_is_const && b_is_const) {
+				auto &ca = root->type == CONST ? root->name : root->subtree[0]->name;
+				auto &cb = b.root->type == CONST ? b.root->name : b.root->subtree[0]->name;
+				if(ca.size() < cb.size()) {
 					return true;
 				}
-				else if(root->name.size() == b.root->name.size()) {
-					return root->name < b.root->name;
+				else if(ca.size() == cb.size()) {
+					return ca < cb;
 				}
 				return false;
 			}
@@ -838,6 +838,18 @@ namespace chis {
 			else {
 				return b._sufexpr == a._sufexpr;
 			}
+		}
+		static bool equal(expr_node *a, Expr &b) {
+			if(b._sufexpr.empty()) {
+				b._sufexpr = sufexpr(b.root);
+			}
+			return sufexpr(a) == b._sufexpr;
+		}
+		static bool equal(Expr &a, expr_node *b) {
+			if(a._sufexpr.empty()) {
+				a._sufexpr = sufexpr(a.root);
+			}
+			return sufexpr(b) == a._sufexpr;
 		}
 		static stdexpr_map stdexpr(const expr_node *subroot, std::set<Expr*, Expr_ptr_cmp> &ptr_map);
 		static Expr diff(const expr_node *subroot, const std::string &x);

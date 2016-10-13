@@ -27,6 +27,18 @@ namespace chis {
 		{ DIFF, 6 },
 		{ MIN, 6 }, { MAX, 6 },
 	};
+	std::map<int, int> operand = {
+		{ ADD, 2 }, { SUB, 2 },
+		{ MUL, 2 }, { DIV, 2 },
+		{ MOD, 2 }, { LOG, 2 }, 
+		{ POW, 2 }, { MAX, 2 },
+		{ MIN, 2 },
+		{ NEGA, 1 }, { POSI, 1 },
+		{ SIN, 1 }, { COS, 1 },
+		{ TAN, 1 }, { COT, 1 },
+		{ ARCSIN, 1 }, { ARCCOS, 1 },
+		{ ARCTAN, 1 }, { ARCCOT, 1 },
+	};
 	std::map<int, bool> exchangadble = {
 		{ ADD, true }, { SUB, false },
 		{ MUL, true }, { DIV, false },
@@ -50,6 +62,14 @@ namespace chis {
 		strs << num;
 		std::string ret;
 		strs >> ret;
+		if(ret.find('.') != std::string::npos) {
+			while(!ret.empty() && (ret.back() == '0' || ret.back() == '.')) {
+				ret.pop_back();
+			}
+			if(ret.empty()) {
+				ret = "0";
+			}
+		}
 		return ret;
 	}
 	void Expr::expr_lexer::scan() {
@@ -101,14 +121,8 @@ namespace chis {
 					--ndot;
 				}
 				++scan_index;
-				bool showpoint = false;
-				bool point_is_useful = false;
 				for(; ndot && scan_index != end; ++scan_index) {
-					if(showpoint && (*scan_index > '0' && *scan_index <= '9')) {
-						point_is_useful = true;
-					}
 					if(*scan_index == '.') {
-						showpoint = true;
 						--ndot;
 					}
 					//不是合法的NUM字符
@@ -118,13 +132,19 @@ namespace chis {
 					}
 					name.push_back(*scan_index);
 				}
+
 				if(name == ".") {
 					error_message += "'.' is not a CONST.\n";
 					token_buffer.push(ERROR_NODE);
 				}
 				else {
-					if(showpoint && !point_is_useful) {
-						name = name.substr(0, name.find('.'));
+					if(ndot != 2) {
+						while(!name.empty() &&(name.back() == '0' || name.back() == '.')) {
+							name.pop_back();
+						}
+						if(name.empty()) {
+							name = "0";
+						}
 					}
 					token_buffer.push(expr_node(CONST, name));
 				}
@@ -163,7 +183,6 @@ namespace chis {
 			++scan_index;
 		}
 	}
-
 	/*
 	1
 	EQU_EXP -> ADD_EXP
@@ -757,9 +776,8 @@ namespace chis {
 				//exprb为整数
 				&& exprb.size() == 1 && exprb.begin()->first.size() == 1
 				&& exprb.begin()->first.begin()->first->root->type == CONST
-				&& exprb.begin()->first.begin()->first->root->name.find('.') == std::string::npos
-				&& exprb.begin()->first.begin()->first->root->name.find('-') == std::string::npos) {
-				int n = to_double(exprb.begin()->first.begin()->first->root->name);
+				&& exprb.begin()->first.begin()->first->root->name.find('.') == std::string::npos) {
+				int n = (int)to_double(exprb.begin()->first.begin()->first->root->name);
 				ret = expra;
 				//去括号
 				for(int k = 1; k < n; ++k) {
@@ -913,14 +931,14 @@ namespace chis {
 			// *
 			//n x
 			if(a.root->subtree[0]->type == CONST &&
-				Expr::equal(a.root->subtree[1], b.root)) {
+				Expr::equal(a.root->subtree[1], b)) {
 				return Expr(to_string(
 					to_double(a.root->subtree[0]->name) + 1)) * std::move(b);
 			}
 			// *
 			//x n
 			if(a.root->subtree[1]->type == CONST &&
-				Expr::equal(a.root->subtree[0], b.root)) {
+				Expr::equal(a.root->subtree[0], b)) {
 				return Expr(to_string(
 					to_double(a.root->subtree[1]->name) + 1))* std::move(b);
 			}
@@ -930,34 +948,34 @@ namespace chis {
 			// *
 			//n x
 			if(b.root->subtree[0]->type == CONST &&
-				Expr::equal(b.root->subtree[1], a.root)) {
+				Expr::equal(b.root->subtree[1], a)) {
 				return Expr(to_string(
 					to_double(b.root->subtree[0]->name) + 1))*(std::move(a));
 			}
 			// *
 			//x n
 			if(b.root->subtree[1]->type == CONST &&
-				Expr::equal(b.root->subtree[0], a.root)) {
+				Expr::equal(b.root->subtree[0], a)) {
 				return Expr(to_string(
 					to_double(b.root->subtree[1]->name) + 1))*(std::move(a));
 			}
 		}
 		//x + x = 2x
-		if(Expr::equal(a.root, b.root)) {
+		if(Expr::equal(a, b)) {
 			return Expr("2") * std::move(b);
 		}
 		//x + -x = 0
-		if(b.root->type == NEGA && Expr::equal(a.root, b.root->subtree[0])) {
+		if(b.root->type == NEGA && Expr::equal(a, b.root->subtree[0])) {
 			return Expr("0");
 		}
-		if(a.root->type == NEGA && Expr::equal(a.root->subtree[0], b.root)) {
+		if(a.root->type == NEGA && Expr::equal(a.root->subtree[0], b)) {
 			return Expr("0");
 		}
 		//x-y + y = x
-		if(b.root->type == SUB && Expr::equal(a.root, b.root->subtree[1])) {
+		if(b.root->type == SUB && Expr::equal(a, b.root->subtree[1])) {
 			return Expr::reverse_parse(b.root->subtree[0]);
 		}
-		if(a.root->type == SUB && Expr::equal(b.root, a.root->subtree[1])) {
+		if(a.root->type == SUB && Expr::equal(b, a.root->subtree[1])) {
 			return Expr::reverse_parse(a.root->subtree[0]);
 		}
 		return Expr::opt(std::move(a), ADD, "+", std::move(b));
@@ -985,7 +1003,7 @@ namespace chis {
 				to_double(b.root->name) + to_double(a.root->subtree[0]->name)));
 		}
 		//x - x = 0
-		else if(Expr::equal(a.root, b.root)) {
+		else if(Expr::equal(a, b)) {
 			return Expr("0");
 		}
 		if(a.root->type == MUL && b.root->type == MUL) {
@@ -1022,7 +1040,7 @@ namespace chis {
 				to_double(a.root->name) * to_double(b.root->name));
 		}
 		//x * x = x^2
-		if(Expr::equal(a.root, b.root)) {
+		if(Expr::equal(a, b)) {
 			return Expr::opt(std::move(a), POW, "^", Expr("2"));
 		}
 		//m*x * n = m*n*x
@@ -1040,10 +1058,10 @@ namespace chis {
 			return std::move(b);
 		}
 		// (fx / gx)*gx = fx
-		if(b.root->type == DIV && Expr::equal(a.root, b.root->subtree[1])) {
+		if(b.root->type == DIV && Expr::equal(a, b.root->subtree[1])) {
 			return Expr::reverse_parse(b.root->subtree[0]);
 		}
-		if(a.root->type == DIV && Expr::equal(b.root, a.root->subtree[1])) {
+		if(a.root->type == DIV && Expr::equal(b, a.root->subtree[1])) {
 			return Expr::reverse_parse(a.root->subtree[0]);
 		}
 
@@ -1063,12 +1081,12 @@ namespace chis {
 		}
 		// gx^a * gx = gx^(a+1)
 		if(b.root->type == POW
-			&& Expr::equal(b.root->subtree[0], a.root)) {
+			&& Expr::equal(b.root->subtree[0], a)) {
 			return Expr::reverse_parse(b.root->subtree[0])
 				^ (Expr::reverse_parse(b.root->subtree[1]) + Expr("1"));
 		}
 		if(a.root->type == POW
-			&& Expr::equal(b.root, a.root->subtree[0])) {
+			&& Expr::equal(b, a.root->subtree[0])) {
 			return Expr::reverse_parse(a.root->subtree[0])
 				^ (Expr::reverse_parse(a.root->subtree[1]) + Expr("1"));
 		}
@@ -1105,7 +1123,7 @@ namespace chis {
 				to_double(a.root->name) / to_double(b.root->name));
 		}
 		//x / x = 1
-		else if(Expr::equal(a.root, b.root)) {
+		else if(Expr::equal(a, b)) {
 			return Expr("1");
 		}
 		// gx^a / gx^b = gx^(a-b)
@@ -1123,16 +1141,16 @@ namespace chis {
 		}
 		// x/y / x = 1/y
 		if(a.root->type == DIV
-			&& Expr::equal(a.root->subtree[0], b.root)) {
+			&& Expr::equal(a.root->subtree[0], b)) {
 			return
 				Expr("1") / Expr::reverse_parse(a.root->subtree[1]);
 		}
 		// x*y / x = y
 		if(a.root->type == MUL) {
-			if(Expr::equal(a.root->subtree[0], b.root)) {
+			if(Expr::equal(a.root->subtree[0], b)) {
 				return Expr::reverse_parse(a.root->subtree[1]);
 			}
-			else if(Expr::equal(a.root->subtree[1], b.root)) {
+			else if(Expr::equal(a.root->subtree[1], b)) {
 				return Expr::reverse_parse(a.root->subtree[0]);
 			}
 		}
