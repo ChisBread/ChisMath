@@ -1,20 +1,21 @@
 #pragma once
 #include <iostream>
-#include <fstream>
 #include <strstream>
 #include <algorithm>
 #include <string>
 #include <vector>
 #include <list>
-#include <forward_list>
 #include <queue>
+#include <unordered_map>
 #include <map>
 #include <set>
 #include <cmath>
 #define M_PI 3.14159265358979323846
 #define M_E 2.71828182845904523536
+#define ABS(a) ((a)>0?(a):-(a));
+#define IS_INT(x) ((((int)(x) - (x)) > 0?(int)(x) - (x):(x)-(int)(x)) < 1e-10)
 namespace chis {
-	enum {
+	const enum {
 		ERROR,
 		ID, CONST, VARI,
 		DOT,
@@ -29,14 +30,15 @@ namespace chis {
 		DIFF,//Î¢·Ö
 		MIN, MAX,
 	};
-
-	extern int max_typeid;
-	extern std::map<std::string, int> keyword;
-	extern std::map<int, int> prec_map;
-	extern std::map<int, bool> exchangadble;
-	extern std::map<int, int> operand;
-	double to_double(const std::string &num);
-	std::string to_string(double num);
+	using FLOAT = long double;
+	class map;
+	extern const int max_typeid;
+	extern std::unordered_map<std::string, int> keyword;
+	extern map prec_map;
+	extern map exchangadble;
+	extern map operand;
+	FLOAT to_FLOAT(const std::string &num);
+	std::string to_string(FLOAT num);
 	class Expr;
 	Expr operator+(Expr &&a, Expr &&b);
 	Expr operator-(Expr &&a, Expr &&b);
@@ -44,6 +46,8 @@ namespace chis {
 	Expr operator/(Expr &&a, Expr &&b);
 	Expr operator%(Expr &&a, Expr &&b);
 	Expr operator^(Expr &&a, Expr &&b);
+
+
 	class Expr {
 		friend Expr operator+(Expr &&a, Expr &&b);
 		friend Expr operator-(Expr &&a, Expr &&b);
@@ -63,14 +67,7 @@ namespace chis {
 			friend class Expr;
 		public:
 			expr_node() {}
-			expr_node(int type, std::string name) :type(type), name(name) {
-				if(prec_map.find(type) != prec_map.end()) {
-					prec = prec_map[type];
-				}
-				else {
-					prec = 5;
-				}
-			}
+			expr_node(int type, std::string name);
 			//½ûÖ¹¿½±´
 			expr_node& operator=(const expr_node&) = delete;
 			void insert_subtree(expr_node &st) {
@@ -205,9 +202,10 @@ namespace chis {
 			bool operator()(const Expr *a, const Expr *b) const {
 				return *a < *b;
 			}
-		};
+		};	
+		using plyn_map = std::map<Expr*, FLOAT, Expr_ptr_cmp>;
 		struct Expr_map_cmp {
-			bool operator()(const std::map<Expr*, int, Expr_ptr_cmp> &a, const std::map<Expr*, int, Expr_ptr_cmp> &b) const {
+			bool operator()(const plyn_map &a, const plyn_map &b) const {
 				auto ia = a.begin(), ib = b.begin();
 				for(; ia != a.end() && ib != b.end(); ++ia, ++ib) {
 					if(*(ia->first) < *(ib->first)) {
@@ -228,8 +226,7 @@ namespace chis {
 				return a.size() < b.size();
 			}
 		};
-		using plyn_map = std::map<Expr*, int, Expr_ptr_cmp>;
-		using stdexpr_map = std::map<plyn_map, int, Expr_map_cmp>;
+		using stdexpr_map = std::map<plyn_map, FLOAT, Expr_map_cmp>;
 	public:
 		Expr(const std::string &expr) {
 			expr_lexer lexer(node_pool, expr);
@@ -278,6 +275,11 @@ namespace chis {
 		Expr(const expr_node *rootb):Expr(reverse_parse(rootb)) {
 			init_id();
 		}
+		Expr(FLOAT f) {
+			node_pool.push_back(expr_node(CONST, to_string(f)));
+			root = &node_pool.back();
+			root->parent = &NIL;
+		}
 		Expr(Expr &&expr) 
 			:id_type(std::move(expr.id_type)),
 			id_value(std::move(expr.id_value)), _sufexpr(std::move(expr._sufexpr)) {
@@ -285,46 +287,11 @@ namespace chis {
 			root = expr.root;
 			expr.root = nullptr;
 		}
-		Expr(Expr &&a, expr_node &opt, Expr &&b)
-			:id_type(std::move(a.id_type)),
-			id_value(std::move(a.id_value)) {
-			if(prec_map[a.root->type] < prec_map[opt.type]
-				||
-				(prec_map[a.root->type] == prec_map[opt.type]
-				//²»Âú×ã½»»»ÂÉ
-				&& (!exchangadble[a.root->type] && !exchangadble[opt.type])
-				)) {
-				a.node_pool.push_front(expr_node(LP, "("));
-				a.node_pool.push_back(expr_node(RP, ")"));
-			}
-			if(prec_map[b.root->type] < prec_map[opt.type]
-				||
-				(prec_map[b.root->type] == prec_map[opt.type]
-				//²»Âú×ã½»»»ÂÉ
-				&& (!exchangadble[b.root->type] && !exchangadble[opt.type])
-				)) {
-				b.node_pool.push_front(expr_node(LP, "("));
-				b.node_pool.push_back(expr_node(RP, ")"));
-			}
-
-			node_pool.splice(node_pool.end(), a.node_pool);
-			node_pool.push_back(opt);
-			root = &node_pool.back();
-			root->subtree.push_back(a.root);
-			root->subtree.push_back(b.root);
-			node_pool.splice(node_pool.end(), b.node_pool);
-			
-			a.root = b.root = nullptr;
-			for(auto &&i : std::move(b.id_type)) {
-				id_type.insert(i);
-			}
-			for(auto &&i : std::move(b.id_value)) {
-				id_value.insert(i);
-			}
-		}
+		Expr(Expr &&a, expr_node &opt, Expr &&b);
 		Expr(expr_node &opt, Expr &&a)
 			:id_type(std::move(a.id_type)),
 			id_value(std::move(a.id_value)) {
+			_sufexpr.clear();
 			node_pool.splice(node_pool.end(), a.node_pool);
 			if(a.root->type != ID && a.root->type != CONST) {
 				node_pool.push_front(expr_node(LP, "("));
@@ -338,6 +305,9 @@ namespace chis {
 		Expr(expr_node &opt, Expr &&a, Expr &&b)
 			:id_type(std::move(a.id_type)),
 			id_value(std::move(a.id_value)) {
+			if(!a._sufexpr.empty() && !b._sufexpr.empty()) {
+				_sufexpr = '(' + opt.name + ')' + a._sufexpr + b._sufexpr;
+			}
 			node_pool.splice(node_pool.end(), a.node_pool);
 			node_pool.push_back(expr_node(DOT, ","));
 			node_pool.splice(node_pool.end(), b.node_pool);
@@ -392,7 +362,7 @@ namespace chis {
 				id_type[t.first] = t.second;
 			}
 		}
-		void set_id_value(const std::vector<std::pair<std::string, double>> &values) {
+		void set_id_value(const std::vector<std::pair<std::string, FLOAT>> &values) {
 			for(auto &v : values) {
 				id_value[v.first] = v.second;
 			}
@@ -495,14 +465,14 @@ namespace chis {
 		}
 		static Expr max(Expr &&a, Expr &&b) {
 			if(a.root->type == CONST && b.root->type == CONST) {
-				double da = to_double(a.root->name), db = to_double(b.root->name);
+				FLOAT da = to_FLOAT(a.root->name), db = to_FLOAT(b.root->name);
 				return to_string(da > db ? da : db);
 			}
 			return call_func(a, b, MAX, "max");
 		}
 		static Expr min(Expr &&a, Expr &&b) {
 			if(a.root->type == CONST && b.root->type == CONST) {
-				double da = to_double(a.root->name), db = to_double(b.root->name);
+				FLOAT da = to_FLOAT(a.root->name), db = to_FLOAT(b.root->name);
 				return to_string(da < db ? da : db);
 			}
 			return call_func(a, b, MIN, "min");
@@ -569,23 +539,27 @@ namespace chis {
 		static Expr to_expr(stdexpr_map &exprs) {
 			std::list<Expr> addexp;
 			for(auto &i : exprs) {
+				
 				std::list<Expr> unequ;
 				for(auto &j:i.first) {
 					//a1^n1*a2^n2....
 					if(j.first->root->type == CONST) {
-						unequ.push_back(Expr(to_string(
-							std::pow(to_double(j.first->root->name), j.second))));
+						unequ.push_back(
+							Expr(std::pow(to_FLOAT(j.first->root->name), j.second))
+							);
 					}
 					else {
-						unequ.push_back(Expr(*j.first) ^ Expr(to_string(j.second)));
+						unequ.push_back(Expr(*j.first) ^ Expr(j.second));
 					}
 				}
 				addexp.push_back(Expr("1"));
 				for(auto &j : unequ) {
 					addexp.back() = std::move(addexp.back()) * std::move(j);
 				}
+				if(addexp.size() == 388) {
+					int n = 10;
+				}
 				addexp.back() = Expr(to_string(i.second) * std::move(addexp.back()));
-				addexp.back()._sufexpr.clear();
 			}
 			Expr ret("0");
 			for(auto &i:addexp) {
@@ -593,122 +567,16 @@ namespace chis {
 			}
 			return ret;
 		}
-		bool operator<(Expr &b) {
-			bool this_is_const = (root->type == CONST
-				|| (operand[root->type] == 1 && root->subtree[0]->type == CONST));
-			bool b_is_const = (b.root->type == CONST
-				|| (operand[b.root->type] == 1 && b.root->subtree[0]->type == CONST));
-			if(this_is_const && !b_is_const) {
-				return true;
-			}
-			if(!this_is_const && b_is_const) {
-				return false;
-			}
-			if(this_is_const && b_is_const) {
-				auto &ca = root->type == CONST ? root->name : root->subtree[0]->name;
-				auto &cb = b.root->type == CONST ? b.root->name : b.root->subtree[0]->name;
-				if(ca.size() < cb.size()) {
-					return true;
-				}
-				else if(ca.size() == cb.size()) {
-					return ca < cb;
-				}
-				return false;
-			}
-			if(_sufexpr.empty()) {
-				_sufexpr = sufexpr(root);
-			}
-			if(b._sufexpr.empty()) {
-				b._sufexpr = sufexpr(b.root);
-			}
-			return _sufexpr < b._sufexpr;
-		}
-		bool operator<(const Expr &b) const{
-			if(root->type == CONST && b.root->type != CONST) {
-				return true;
-			}
-			if(root->type != CONST && b.root->type == CONST) {
-				return false;
-			}
-			if(root->type == CONST && b.root->type == CONST) {
-				if(root->name.size() < b.root->name.size()) {
-					return true;
-				}
-				else if(root->name.size() == b.root->name.size()) {
-					return root->name < b.root->name;
-				}
-				return false;
-			}
-			if(_sufexpr.empty()) {
-				if(b._sufexpr.empty()) {
-					return sufexpr(root) < sufexpr(b.root);
-				}
-				return sufexpr(root) < b._sufexpr;
-			}
-			else {
-				if(b._sufexpr.empty()) {
-					return _sufexpr < sufexpr(b.root);
-				}
-				return _sufexpr < b._sufexpr;
-			}
-		}
-		bool operator<(const Expr &b) {
-			if(root->type == CONST && b.root->type != CONST) {
-				return true;
-			}
-			if(root->type != CONST && b.root->type == CONST) {
-				return false;
-			}
-			if(root->type == CONST && b.root->type == CONST) {
-				if(root->name.size() < b.root->name.size()) {
-					return true;
-				}
-				else if(root->name.size() == b.root->name.size()) {
-					return root->name < b.root->name;
-				}
-				return false;
-			}
-			if(_sufexpr.empty()) {
-				_sufexpr = sufexpr(root);
-			}
-			if(b._sufexpr.empty()) {
-				return _sufexpr < sufexpr(b.root);
-			}
-			else {
-				return _sufexpr < b._sufexpr;
-			}
-		}
-		bool operator<(Expr &b) const {
-			if(root->type == CONST && b.root->type != CONST) {
-				return true;
-			}
-			if(root->type != CONST && b.root->type == CONST) {
-				return false;
-			}
-			if(root->type == CONST && b.root->type == CONST) {
-				if(root->name.size() < b.root->name.size()) {
-					return true;
-				}
-				else if(root->name.size() == b.root->name.size()) {
-					return root->name < b.root->name;
-				}
-				return false;
-			}
-			if(b._sufexpr.empty()) {
-				b._sufexpr = sufexpr(b.root);
-			}
-			if(_sufexpr.empty()) {
-				return sufexpr(root) < b._sufexpr;
-			}
-			else {
-				return _sufexpr < b._sufexpr;
-			}
-		}
+		bool operator<(Expr &b);
+		bool operator<(const Expr &b) const;
+		bool operator<(const Expr &b);
+		bool operator<(Expr &b) const;
 		void swap(Expr &b) {
 			std::swap(root, b.root);
 			std::swap(id_type, b.id_type);
 			std::swap(id_value, b.id_value);
 			std::swap(node_pool, b.node_pool);
+			std::swap(_sufexpr, b._sufexpr);
 		}
 		Expr& reverse_parse() {
 			swap(reverse_parse(root));
@@ -772,6 +640,20 @@ namespace chis {
 				next_ply = temp;
 			}
 		}
+	private:
+		static Expr reverse_parse(const expr_node *subroot);
+		static bool equal(const expr_node *a, const expr_node *b) {
+			return sufexpr(a)==sufexpr(b);
+		}
+		static std::string sufexpr(const expr_node *r) {
+			std::string expr = '[' + r->name + ']';
+			if(!(r->subtree.empty())) {
+				for(auto &i:r->subtree) {
+					expr += sufexpr(i);
+				}
+			}
+			return std::move(expr);
+		}
 		static int ast_ply(const expr_node *root) {
 			if(!root) {
 				return 0;
@@ -779,20 +661,6 @@ namespace chis {
 			int l = root->subtree.empty() ? 0 : ast_ply(root->subtree[0]);
 			int r = root->subtree.size() < 2 ? 0 : ast_ply(root->subtree[1]);
 			return (l > r ? l : r) + 1;
-		}
-	private:
-		static Expr reverse_parse(const expr_node *subroot);
-		static bool equal(const expr_node *a, const expr_node *b) {
-			return sufexpr(a)==sufexpr(b);
-		}
-		static std::string sufexpr(const expr_node *r) {
-			std::string expr = r->name;
-			if(!(r->subtree.empty())) {
-				for(auto &i:r->subtree) {
-					expr += sufexpr(i);
-				}
-			}
-			return std::move(expr)+"|";
 		}
 		static bool equal(const Expr &a, const Expr &b) {
 			if(a._sufexpr.empty()) {
@@ -858,15 +726,17 @@ namespace chis {
 		static expr_node NIL;
 		expr_node *root;
 		std::map<std::string, int> id_type;
-		std::map<std::string, double> id_value;
+		std::map<std::string, FLOAT> id_value;
 		std::list<expr_node> node_pool;
 		std::string _sufexpr;
 	};
 	using plyn_map = Expr::plyn_map;
 	using stdexpr_map = Expr::stdexpr_map;
 	plyn_map& operator*=(plyn_map &a, const plyn_map &b);
-	stdexpr_map& operator+=(stdexpr_map &a, const std::pair<plyn_map, int> &b);
-	stdexpr_map& operator*=(stdexpr_map &a, const std::pair<plyn_map, int> &b);
+	plyn_map& operator/=(plyn_map &a, const plyn_map &b);
+	stdexpr_map& operator+=(stdexpr_map &a, const std::pair<plyn_map, FLOAT> &b);
+	stdexpr_map& operator*=(stdexpr_map &a, const std::pair<plyn_map, FLOAT> &b);
+	stdexpr_map& operator/=(stdexpr_map &a, const std::pair<plyn_map, FLOAT> &b);
 	stdexpr_map& operator+=(stdexpr_map &a, const stdexpr_map &b);
 	stdexpr_map& operator*=(stdexpr_map &a, const stdexpr_map &b);
 

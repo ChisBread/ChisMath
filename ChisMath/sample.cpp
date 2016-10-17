@@ -7,16 +7,26 @@ int main() {
 		std::cin >> exp >> dep_var;
 		Expr expr(exp);
 		//Expr expr("x^(21*x*9)");
-		std::cout << expr.errors();
-		expr.clear_errors();
-		std::cout << "REV:" << expr.reverse_parse().string_expr() << std::endl;
-		std::cout << "STD:" << expr.stdexpr().string_expr() << std::endl;
-		//求导
-		expr = Expr::make_diff(expr, dep_var);
-		std::cout << expr.errors();
-		expr.clear_errors();
-		if(expr.get_root()) {
-			std::cout << "D:" << expr.reverse_parse().stdexpr().string_expr() << std::endl;
+		
+		if(!expr.errors().empty()) {
+			std::cout << expr.errors();
+			expr.clear_errors();
+		}
+		
+		else {
+			std::cout << "REV:" << expr.reverse_parse().string_expr() << std::endl;
+			std::cout << "STD:" << expr.stdexpr().string_expr() << std::endl;
+			//求导
+			expr = Expr::make_diff(expr, dep_var);
+			if(!expr.errors().empty()) {
+				std::cout << expr.errors();
+				expr.clear_errors();
+			}
+			else {
+				if(expr.get_root()) {
+					std::cout << "D:" << expr.reverse_parse().stdexpr().string_expr() << std::endl;
+				}
+			}
 		}
 	}
 	//x^(1+y+1+y)
