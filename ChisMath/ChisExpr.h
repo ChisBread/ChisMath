@@ -27,19 +27,21 @@ namespace chis {
 		ARCSIN, ARCCOS, ARCTAN, ARCCOT,
 		LOG, LN,
 		LP, RP,
-		DIFF,//Î¢·Ö
+		DIFF,//å¾®åˆ†
 		MIN, MAX,
 	};
 	using FLOAT = long double;
 	class map;
+	class Expr;
+	
 	extern const int max_typeid;
 	extern std::unordered_map<std::string, int> keyword;
 	extern map prec_map;
 	extern map exchangadble;
 	extern map operand;
+	
 	FLOAT to_FLOAT(const std::string &num);
 	std::string to_string(FLOAT num);
-	class Expr;
 	Expr operator+(Expr &&a, Expr &&b);
 	Expr operator-(Expr &&a, Expr &&b);
 	Expr operator*(Expr &&a, Expr &&b);
@@ -68,7 +70,7 @@ namespace chis {
 		public:
 			expr_node() {}
 			expr_node(int type, std::string name);
-			//½ûÖ¹¿½±´
+			//ç¦æ­¢æ‹·è´
 			expr_node& operator=(const expr_node&) = delete;
 			void insert_subtree(expr_node &st) {
 				st.parent = this;
@@ -214,7 +216,7 @@ namespace chis {
 					else if(*(ib->first) < *(ia->first)) {
 						return false;
 					}
-					//first ÏàµÈ
+					//first ç›¸ç­‰
 					else if(ia->second < ib->second) {
 						return true;
 					}
@@ -247,7 +249,7 @@ namespace chis {
 			tslt[nullptr] = nullptr;
 			tslt[&NIL] = &NIL;
 			for(auto i = node_pool.begin(); i != node_pool.end(); ++i, ++j) {
-				//½«Ô´½ÚµãµØÖ··­Òë³É´ý¹¹Ôì±í´ïÊ½µÄ½ÚµãµØÖ·
+				//å°†æºèŠ‚ç‚¹åœ°å€ç¿»è¯‘æˆå¾…æž„é€ è¡¨è¾¾å¼çš„èŠ‚ç‚¹åœ°å€
 				tslt[&(*j)] = &(*i);
 			}
 			for(auto &i : node_pool) {
@@ -341,7 +343,7 @@ namespace chis {
 			_sufexpr = sufexpr(root);
 		}
 		bool is_constexpr() const{
-			//Ã»ÓÐÎ´ÖªÊý
+			//æ²¡æœ‰æœªçŸ¥æ•°
 			if(id_type.empty()) {
 				return true;
 			}
@@ -504,7 +506,7 @@ namespace chis {
 			return diff(y.root, x);
 		}
 		static bool same_plynomials(const Expr &a, const Expr &b) {
-			//Í¬ÊôÒ»¸öÕûÊ½
+			//åŒå±žä¸€ä¸ªæ•´å¼
 			if(a.root->type == CONST && b.root->type == CONST) {
 				return true;
 			}
